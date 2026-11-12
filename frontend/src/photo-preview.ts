@@ -2,6 +2,7 @@ import { detectFaces, prepareFaceFrame } from "./face-analysis";
 import { checkFraming, checkImageQuality } from "./face-quality";
 import { prepareMakeup, type LayerSettings } from "./makeup-preview";
 import { mountRecommendations } from "./recommendation-panel";
+import { mountProviderSettings } from "./provider-settings";
 import type { Preset, PresetLayer } from "./recommendations";
 
 type PickResult = { url?: string; message?: string };
@@ -153,6 +154,7 @@ export function mountPhotoPreview(section: HTMLElement) {
       </div>
     </div>
     <section id="recommendations" class="recommendation-panel" aria-labelledby="recommendation-title"></section>
+    <section id="provider-settings" class="recommendation-panel" aria-labelledby="provider-title"></section>
   `;
   const pick = section.querySelector<HTMLButtonElement>("#pick-photo")!;
   const clear = section.querySelector<HTMLButtonElement>("#clear-photo")!;
@@ -186,6 +188,10 @@ export function mountPhotoPreview(section: HTMLElement) {
   const recommendations = mountRecommendations(
     section.querySelector<HTMLElement>("#recommendations")!,
     applyPreset,
+  );
+  mountProviderSettings(
+    section.querySelector<HTMLElement>("#provider-settings")!,
+    recommendations.setProvider,
   );
 
   function setBusy(busy: boolean) {
@@ -365,6 +371,7 @@ export function mountPhotoPreview(section: HTMLElement) {
   }
 
   async function selectProject(operation: "CreateProject" | "OpenProject") {
+    recommendations.cancelExplanation();
     setBusy(true);
     try {
       const result = await call<ProjectResult>(operation);
@@ -417,6 +424,7 @@ export function mountPhotoPreview(section: HTMLElement) {
   });
 
   closeProject.addEventListener("click", async () => {
+    recommendations.cancelExplanation();
     setBusy(true);
     try {
       if (!(await call<boolean>("CloseProject"))) throw new Error();

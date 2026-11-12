@@ -17,6 +17,7 @@ func main() {
 		log.Fatal(err)
 	}
 	preview := &PhotoPreviewService{}
+	providerService := &ProviderService{store: desktopProviderStore(), client: desktopProviderClient()}
 	faceRoot, faceFixture := desktopFaceRuntime()
 	app := application.New(application.Options{
 		Name:        "MakeupMirror",
@@ -26,7 +27,7 @@ func main() {
 			Middleware:     application.ChainMiddleware(preview.assets, faceRuntimeAssets(faceRoot, faceFixture)),
 			DisableLogging: true,
 		},
-		Services: []application.Service{application.NewService(preview)},
+		Services: []application.Service{application.NewService(preview), application.NewService(providerService)},
 		Windows:  desktopOptions(),
 	})
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{

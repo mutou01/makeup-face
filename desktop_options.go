@@ -3,11 +3,23 @@
 package main
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"makeupmirror/internal/provider"
 )
+
+func desktopProviderClient() *http.Client { return provider.NewHTTPClient() }
+
+func desktopProviderStore() *provider.Store {
+	directory, err := os.UserCacheDir()
+	if err != nil {
+		return provider.NewStore("", provider.WindowsVault{})
+	}
+	return provider.NewStore(filepath.Join(directory, "MakeupMirror"), provider.WindowsVault{})
+}
 
 func desktopOptions() application.WindowsOptions {
 	return application.WindowsOptions{}

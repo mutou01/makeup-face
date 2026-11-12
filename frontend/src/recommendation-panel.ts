@@ -1,4 +1,5 @@
 import { looks, recommend, scenes, type Preset } from "./recommendations";
+import { requestExplanation, type ProviderView } from "./provider-client";
 
 const layers = [
   ["lipstick", "口红"],
@@ -23,15 +24,71 @@ export function mountRecommendations(
       <div><label for="recommendation-look">妆感偏好</label> <select id="recommendation-look">${options(looks)}</select></div>
     </div>
     <p class="status">分析面部后，可将预设应用到当前照片。</p>
+    <p class="status" id="explanation-notice" hidden></p>
     <ol class="preset-list" aria-label="推荐方案"></ol>
     <p class="status" role="status" aria-label="预设应用结果"></p>
   `;
   const [scene, look] = panel.querySelectorAll("select");
   const list = panel.querySelector("ol")!;
   const feedback = panel.querySelector('[role="status"]')!;
+  const notice = panel.querySelector<HTMLElement>("#explanation-notice")!;
   let available = false;
+  let provider: ProviderView | null = null;
+  let active: { abort: AbortController; button: HTMLButtonElement } | null =
+    null;
+
+  function cancelExplanation() {
+    if (active) {
+      active.abort.abort();
+      active.button.disabled = false;
+      active = null;
+    }
+    for (const result of list.querySelectorAll(".explanation-result"))
+      result.textContent = "";
+  }
+
+  function explanationControls(card: HTMLElement, preset: Preset) {
+    const id = document.createElement("span");
+    id.className = "preset-id";
+    id.textContent = `预设编号：${preset.id}`;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = `生成${preset.name}的 AI 解释`;
+    const result = document.createElement("p");
+    result.className = "explanation-result";
+    result.setAttribute("role", "status");
+    button.addEventListener("click", async () => {
+      if (!provider?.enabled) return;
+      cancelExplanation();
+      const request = { abort: new AbortController(), button };
+      active = request;
+      button.disabled = true;
+      result.textContent = "正在生成 AI 解释…";
+      try {
+        const text = await requestExplanation(
+          { scene: scene.value, look: look.value, preset_id: preset.id },
+          request.abort.signal,
+        );
+        if (active === request) result.textContent = text;
+      } catch {
+        if (active === request)
+          result.textContent = "AI 解释暂不可用，仍可参考本地说明。";
+      } finally {
+        if (active === request) {
+          active = null;
+          button.disabled = false;
+        }
+      }
+    });
+    card.append(id, button, result);
+  }
 
   function render() {
+    cancelExplanation();
+    notice.hidden = !provider?.enabled;
+    notice.textContent = provider?.enabled
+      ? `发送至 ${new URL(provider.endpoint).host}：场景（${scene.selectedOptions[0].text}）、妆感偏好（${look.selectedOptions[0].text}）和所选预设编号。`
+      : "";
     list.replaceChildren(
       ...recommend(scene.value, look.value).map(({ preset, reason }) => {
         const card = document.createElement("li");
@@ -55,6 +112,7 @@ export function mountRecommendations(
         }
         const button = document.createElement("button");
         button.type = "button";
+        button.className = "apply-preset";
         button.textContent = `应用${preset.name}`;
         button.disabled = !available;
         button.addEventListener("click", () => {
@@ -66,6 +124,7 @@ export function mountRecommendations(
             : `已应用「${preset.name}」，可继续微调。`;
         });
         card.append(title, details, palette, button);
+        if (provider?.enabled) explanationControls(card, preset);
         return card;
       }),
     );
@@ -75,6 +134,11 @@ export function mountRecommendations(
   look.addEventListener("change", render);
   render();
   return {
+    setProvider(view: ProviderView | null) {
+      provider = view;
+      render();
+    },
+    cancelExplanation,
     preferences: () => ({ scene: scene.value, look: look.value }),
     restore(sceneValue: string, lookValue: string) {
       scene.value = sceneValue;
@@ -83,10 +147,13 @@ export function mountRecommendations(
     },
     setAvailable(value: boolean) {
       available = value;
-      for (const button of list.querySelectorAll("button"))
+      for (const button of list.querySelectorAll<HTMLButtonElement>(
+        ".apply-preset",
+      ))
         button.disabled = !value;
     },
     resetFeedback() {
+      cancelExplanation();
       feedback.textContent = "";
     },
   };

@@ -16,4 +16,6 @@
 
 「移除项目照片」会清除项目中的照片副本和妆容；原件、已保存的推荐偏好以及目录内的其他文件会保留。
 
+如需补充解释，在「AI 解释设置」填写支持聊天补全的 HTTPS 接口、模型编号和密钥，勾选启用后保存。推荐卡片会显示发送范围；点击「生成」才联系供应商。失败时仍可查看本地理由。详见[AI 解释说明](subsystems/ai-explanation.md)。
+
 应用缺少 WebView2 时，按 [Microsoft 指引](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution)安装运行时。验收需要能够启动桌面应用的 Windows 会话，使用 `npm run verify`。测试程序、正式构建和本机资源的区别见[桌面启动说明](subsystems/desktop.md)。
