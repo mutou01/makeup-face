@@ -40,47 +40,64 @@ async function connect(endpoint, getExit) {
   assert.fail("桌面应用未在 20 秒内打开 WebView2 调试连接");
 }
 
+async function withDesktop(run) {
+  await assert.doesNotReject(
+    access(executable),
+    "缺少待验收的 MakeupMirror 桌面程序",
+  );
+
+  const port = await freePort();
+  const tempRoot = await realpath(tmpdir());
+  const profile = await mkdtemp(join(tempRoot, "makeupmirror-smoke-"));
+  let child;
+  let exited;
+  let browser;
+  let exit;
+  try {
+    child = spawn(executable, [], {
+      env: {
+        ...process.env,
+        MAKEUPMIRROR_SMOKE_PORT: String(port),
+        MAKEUPMIRROR_SMOKE_PROFILE: profile,
+      },
+      stdio: ["ignore", "ignore", "inherit"],
+      windowsHide: true,
+    });
+    exited = new Promise((resolve) => {
+      child.once("exit", (code, signal) => {
+        exit = String(signal ?? code);
+        resolve();
+      });
+      child.once("error", (error) => {
+        exit = error.message;
+        resolve();
+      });
+    });
+    browser = await connect(`http://127.0.0.1:${port}`, () => exit);
+    const context = browser.contexts()[0];
+    const page =
+      context.pages()[0] ??
+      (await context.waitForEvent("page", { timeout: 5_000 }));
+    await run(page);
+  } finally {
+    await browser?.close().catch(() => {});
+    if (child && exit === undefined) child.kill();
+    await exited;
+    assert.equal(dirname(await realpath(profile)), tempRoot);
+    await rm(profile, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 200,
+    });
+  }
+}
+
 test(
   "Windows 桌面窗口显示 MakeupMirror 与中文使用说明",
   { timeout: 45_000 },
-  async () => {
-    await assert.doesNotReject(
-      access(executable),
-      "缺少待验收的 MakeupMirror 桌面程序",
-    );
-
-    const port = await freePort();
-    const tempRoot = await realpath(tmpdir());
-    const profile = await mkdtemp(join(tempRoot, "makeupmirror-smoke-"));
-    let child;
-    let exited;
-    let browser;
-    let exit;
-    try {
-      child = spawn(executable, [], {
-        env: {
-          ...process.env,
-          MAKEUPMIRROR_SMOKE_PORT: String(port),
-          MAKEUPMIRROR_SMOKE_PROFILE: profile,
-        },
-        stdio: ["ignore", "ignore", "inherit"],
-        windowsHide: true,
-      });
-      exited = new Promise((resolve) => {
-        child.once("exit", (code, signal) => {
-          exit = String(signal ?? code);
-          resolve();
-        });
-        child.once("error", (error) => {
-          exit = error.message;
-          resolve();
-        });
-      });
-      browser = await connect(`http://127.0.0.1:${port}`, () => exit);
-      const context = browser.contexts()[0];
-      const page =
-        context.pages()[0] ??
-        (await context.waitForEvent("page", { timeout: 5_000 }));
+  () =>
+    withDesktop(async (page) => {
       await page
         .getByRole("heading", { name: "MakeupMirror", exact: true })
         .waitFor({ timeout: 5_000 });
@@ -90,17 +107,81 @@ test(
       await page
         .getByText("导入一张正面照", { exact: false })
         .waitFor({ timeout: 5_000 });
-    } finally {
-      await browser?.close().catch(() => {});
-      if (child && exit === undefined) child.kill();
-      await exited;
-      assert.equal(dirname(await realpath(profile)), tempRoot);
-      await rm(profile, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 200,
-      });
+    }),
+);
+
+async function pixels(canvas) {
+  const result = await canvas.evaluate((element) => {
+    const { width, height } = element;
+    const { data } = element.getContext("2d").getImageData(0, 0, width, height);
+    let binary = "";
+    for (let i = 0; i < data.length; i += 8192) {
+      binary += String.fromCharCode(...data.subarray(i, i + 8192));
     }
-  },
+    return { width, height, bytes: btoa(binary) };
+  });
+  return { ...result, bytes: Buffer.from(result.bytes, "base64") };
+}
+
+test(
+  "合成图口红可开关、改色、调强度，唇区外像素不变",
+  { timeout: 45_000 },
+  () =>
+    withDesktop(async (page) => {
+      const preview = page.getByRole("img", { name: "口红试妆预览" });
+      const enabled = page.getByRole("checkbox", { name: "启用口红" });
+      const color = page.getByLabel("口红颜色");
+      const intensity = page.getByRole("slider", { name: "口红强度" });
+      await preview.waitFor({ timeout: 5_000 });
+      assert.equal(await enabled.isChecked(), false);
+      const original = await pixels(preview);
+      assert.equal(original.width, 240);
+      assert.equal(original.height, 240);
+
+      await enabled.check({ timeout: 5_000 });
+      const painted = await pixels(preview);
+      let changed = 0;
+      let outside = 0;
+      for (let y = 0; y < original.height; y++) {
+        for (let x = 0; x < original.width; x++) {
+          const i = (y * original.width + x) * 4;
+          if (original.bytes.readUInt32LE(i) === painted.bytes.readUInt32LE(i))
+            continue;
+          changed++;
+          if (x < 85 || x > 155 || y < 140 || y > 180) outside++;
+        }
+      }
+      assert.ok(changed > 0, "启用后应实际改变唇区像素");
+      assert.equal(outside, 0, "唇区之外不得改变任何像素");
+      const protectionPoint = (143 * original.width + 91) * 4;
+      assert.equal(
+        painted.bytes.readUInt32LE(protectionPoint),
+        original.bytes.readUInt32LE(protectionPoint),
+      );
+
+      await color.fill("#2556bf", { timeout: 5_000 });
+      const blue = await pixels(preview);
+      const lipPoint = (156 * original.width + 120) * 4;
+      assert.ok(blue.bytes[lipPoint] < painted.bytes[lipPoint]);
+      assert.ok(blue.bytes[lipPoint + 2] > painted.bytes[lipPoint + 2]);
+
+      await intensity.press("Home", { timeout: 5_000 });
+      assert.ok(
+        (await pixels(preview)).bytes.equals(original.bytes),
+        "零强度恢复原像素",
+      );
+      await intensity.press("End", { timeout: 5_000 });
+      const strongest = await pixels(preview);
+      assert.ok(strongest.bytes[lipPoint + 2] > blue.bytes[lipPoint + 2]);
+      await enabled.uncheck({ timeout: 5_000 });
+      assert.ok(
+        (await pixels(preview)).bytes.equals(original.bytes),
+        "关闭后恢复原像素",
+      );
+      await enabled.check({ timeout: 5_000 });
+      assert.ok(
+        (await pixels(preview)).bytes.equals(strongest.bytes),
+        "重新启用不能重复叠涂",
+      );
+    }),
 );
