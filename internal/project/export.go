@@ -1,0 +1,64 @@
+package project
+
+import (
+	"bytes"
+	"encoding/base64"
+	"errors"
+	"image"
+	"image/draw"
+	"image/png"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+const maxPNGBytes = 5 * 1024 * 1024
+
+var (
+	errPNG     = errors.New("预览图格式或尺寸无效。")
+	errPNGName = errors.New("请选择以 .png 结尾的本机文件。")
+	errExists  = errors.New("文件已存在，未覆盖。请选择一个新文件名。")
+	errExport  = errors.New("无法写入预览图，请检查目录权限和剩余空间。")
+)
+
+// ExportPNG re-encodes a bounded work canvas into a new file. Only a path
+// returned by the native save dialog should be passed here.
+func ExportPNG(path, encoded string) error {
+	name := filepath.Base(path)
+	if !filepath.IsAbs(path) || !strings.EqualFold(filepath.Ext(name), ".png") || strings.Contains(name, ":") {
+		return errPNGName
+	}
+	if len(encoded) > base64.StdEncoding.EncodedLen(maxPNGBytes) {
+		return errPNG
+	}
+	input, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || len(input) > maxPNGBytes {
+		return errPNG
+	}
+	config, err := png.DecodeConfig(bytes.NewReader(input))
+	if err != nil || config.Width < 1 || config.Width > 1024 || config.Height < 1 || config.Height > 1024 {
+		return errPNG
+	}
+	decoded, err := png.Decode(bytes.NewReader(input))
+	if err != nil {
+		return errPNG
+	}
+	pixels := image.NewNRGBA(image.Rect(0, 0, config.Width, config.Height))
+	draw.Draw(pixels, pixels.Bounds(), decoded, decoded.Bounds().Min, draw.Src)
+	var output bytes.Buffer
+	if err := png.Encode(&output, pixels); err != nil {
+		return errPNG
+	}
+	root, err := openRoot(filepath.Dir(path))
+	if err != nil {
+		return errPNGName
+	}
+	defer root.Close()
+	if err := writeNew(root, name, output.Bytes()); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return errExists
+		}
+		return errExport
+	}
+	return nil
+}

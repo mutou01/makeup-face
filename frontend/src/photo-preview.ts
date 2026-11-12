@@ -22,7 +22,8 @@ type Operation =
   | "CreateProject"
   | "OpenProject"
   | "SaveProject"
-  | "CloseProject";
+  | "CloseProject"
+  | "ExportPreview";
 
 async function call<T>(operation: Operation, ...args: unknown[]): Promise<T> {
   // Wails serves its runtime from the same embedded application origin.
@@ -130,6 +131,7 @@ export function mountPhotoPreview(section: HTMLElement) {
       <button type="button" id="pick-photo">选择本机照片</button>
       <button type="button" id="analyse-face" disabled>分析面部</button>
       <button type="button" id="clear-photo" disabled>清除预览</button>
+      <button type="button" id="export-preview" disabled>导出预览</button>
     </div>
     <p id="photo-status" class="status" role="status" aria-label="照片处理状态"></p>
     <div id="photo-display"></div>
@@ -145,6 +147,8 @@ export function mountPhotoPreview(section: HTMLElement) {
   `;
   const pick = section.querySelector<HTMLButtonElement>("#pick-photo")!;
   const clear = section.querySelector<HTMLButtonElement>("#clear-photo")!;
+  const exportPreview =
+    section.querySelector<HTMLButtonElement>("#export-preview")!;
   const analyse = section.querySelector<HTMLButtonElement>("#analyse-face")!;
   const status = section.querySelector("#photo-status")!;
   const createProject =
@@ -174,6 +178,7 @@ export function mountPhotoPreview(section: HTMLElement) {
   function setBusy(busy: boolean) {
     pick.disabled = busy;
     clear.disabled = busy || !original;
+    exportPreview.disabled = busy || !original;
     analyse.disabled = busy || !original || !!render;
     recommendations.setAvailable(!busy && render !== null);
     createProject.disabled = openProject.disabled = busy || projectActive;
@@ -297,6 +302,21 @@ export function mountPhotoPreview(section: HTMLElement) {
       status.textContent = "已清除预览。";
     } catch {
       status.textContent = "无法清除预览，请重试。";
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  exportPreview.addEventListener("click", async () => {
+    if (!original) return;
+    setBusy(true);
+    try {
+      const frame = render ? canvas : prepareFaceFrame(original);
+      const encoded = frame.toDataURL("image/png").split(",", 2)[1];
+      if (!encoded) throw new Error("无法编码预览");
+      status.textContent = await call<string>("ExportPreview", encoded);
+    } catch {
+      status.textContent = "无法导出预览，请重试。";
     } finally {
       setBusy(false);
     }

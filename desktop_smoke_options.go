@@ -29,6 +29,10 @@ func desktopProjectPicker(window application.Window) func() (string, error) {
 	return smokePicker("MAKEUPMIRROR_SMOKE_PROJECT_DIRS", nativeProjectPicker(window))
 }
 
+func desktopExportPicker(window application.Window) func() (string, error) {
+	return smokePicker("MAKEUPMIRROR_SMOKE_EXPORT_PATHS", nativeExportPicker(window))
+}
+
 func smokePicker(key string, fallback func() (string, error)) func() (string, error) {
 	raw := os.Getenv(key)
 	if raw == "" {

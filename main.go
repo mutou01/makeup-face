@@ -39,6 +39,7 @@ func main() {
 	})
 	preview.pick = desktopPhotoPicker(window)
 	preview.pickProject = desktopProjectPicker(window)
+	preview.pickExport = desktopExportPicker(window)
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}

@@ -25,6 +25,7 @@ type previewAsset struct {
 type PhotoPreviewService struct {
 	pick        func() (string, error)
 	pickProject func() (string, error)
+	pickExport  func() (string, error)
 	workspace   *project.Store
 	busy        atomic.Bool
 	mu          sync.RWMutex
@@ -44,6 +45,36 @@ func nativeProjectPicker(window application.Window) func() (string, error) {
 			CanChooseFiles(false).CanChooseDirectories(true).
 			SetTitle("选择本机项目目录").PromptForSingleSelection()
 	}
+}
+
+func nativeExportPicker(window application.Window) func() (string, error) {
+	return func() (string, error) {
+		return application.Get().Dialog.SaveFileWithOptions(&application.SaveFileDialogOptions{
+			Title: "导出预览为 PNG", Filename: "makeup-preview.png", Window: window,
+			Filters: []application.FileFilter{{DisplayName: "PNG 图像", Pattern: "*.png"}},
+		}).PromptForSingleSelection()
+	}
+}
+
+func (s *PhotoPreviewService) ExportPreview(encoded string) string {
+	if !s.busy.CompareAndSwap(false, true) {
+		return "正在处理，请稍候。"
+	}
+	defer s.busy.Store(false)
+	s.mu.RLock()
+	hasPhoto := s.current.id != ""
+	s.mu.RUnlock()
+	if !hasPhoto {
+		return "请选择照片后再导出。"
+	}
+	path, err := s.pickExport()
+	if err != nil || path == "" {
+		return "未导出预览。"
+	}
+	if err := project.ExportPNG(path, encoded); err != nil {
+		return err.Error()
+	}
+	return "预览已导出。"
 }
 
 func (s *PhotoPreviewService) CreateProject() projectResult { return s.selectProject(true) }

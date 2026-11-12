@@ -376,6 +376,107 @@ test(
     ),
 );
 
+test(
+  "导出 PNG 与当前试妆像素一致，去除原图元数据且不覆盖文件",
+  { timeout: 45_000 },
+  () =>
+    withDesktop(
+      async (page, profile) => {
+        const exportButton = page.getByRole("button", { name: "导出预览" });
+        await exportButton.waitFor({ timeout: 5_000 });
+        assert.equal(await exportButton.isDisabled(), true);
+        await page
+          .getByRole("button", { name: "选择本机照片" })
+          .click({ timeout: 5_000 });
+        await page
+          .getByRole("button", { name: "分析面部" })
+          .click({ timeout: 5_000 });
+        const canvas = page.getByRole("img", { name: "试妆预览" });
+        await canvas.waitFor({ timeout: 5_000 });
+        await page
+          .getByRole("button", { name: "应用莓果夜妆" })
+          .click({ timeout: 5_000 });
+
+        await exportButton.click({ timeout: 5_000 });
+        await page
+          .getByText("文件已存在，未覆盖", { exact: false })
+          .waitFor({ timeout: 5_000 });
+        assert.equal(
+          await readFile(join(profile, "existing.png"), "utf8"),
+          "keep me",
+        );
+        await exportButton.click({ timeout: 5_000 });
+        await page
+          .getByText("预览已导出", { exact: false })
+          .waitFor({ timeout: 5_000 });
+        const raw = await readFile(join(profile, "exported.png"));
+        assert.equal(raw.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+        const source = await readFile(join(profile, "portrait.png"));
+        assert.ok(
+          source.includes("eXIf") && source.includes("PRIVATE_TEST_TAG"),
+        );
+        const chunks = [];
+        for (let at = 8; at < raw.length;) {
+          const size = raw.readUInt32BE(at);
+          chunks.push(raw.toString("ascii", at + 4, at + 8));
+          at += size + 12;
+        }
+        assert.deepEqual([...new Set(chunks)], ["IHDR", "IDAT", "IEND"]);
+        assert.ok(
+          await canvas.evaluate(
+            async (expected, bytes) => {
+              const bitmap = await createImageBitmap(
+                new Blob([Uint8Array.from(bytes)], { type: "image/png" }),
+              );
+              if (
+                bitmap.width !== expected.width ||
+                bitmap.height !== expected.height
+              )
+                return false;
+              const copy = document.createElement("canvas");
+              copy.width = bitmap.width;
+              copy.height = bitmap.height;
+              const ctx = copy.getContext("2d");
+              ctx.drawImage(bitmap, 0, 0);
+              bitmap.close();
+              const actual = ctx.getImageData(
+                0,
+                0,
+                copy.width,
+                copy.height,
+              ).data;
+              const wanted = expected
+                .getContext("2d")
+                .getImageData(0, 0, copy.width, copy.height).data;
+              return actual.every((n, i) => n === wanted[i]);
+            },
+            [...raw],
+          ),
+          "导出的 PNG 解码像素应与当前画布相同",
+        );
+      },
+      async (profile) => {
+        const env = await makeupFixture(profile, ["portrait"]);
+        await writeFile(
+          join(profile, "portrait.png"),
+          Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAPAAAADwAQMAAAAEm3vRAAAABlBMVEWnX2QAAACveaDXAAAAOGVYSWZNTQAqAAAACAACARIAAwAAAAEAAQAAATsAAgAAABEAAAAmAAAAAFBSSVZBVEVfVEVTVF9UQUcAAKN9y4EAAAAeSURBVHja7cEBDQAAAMKg909tDwcUAAAAAAAAwKcBHRAAAVCb7wMAAAAASUVORK5CYII=",
+            "base64",
+          ),
+        );
+        const existing = join(profile, "existing.png");
+        await writeFile(existing, "keep me");
+        return {
+          ...env,
+          MAKEUPMIRROR_SMOKE_EXPORT_PATHS: JSON.stringify([
+            existing,
+            join(profile, "exported.png"),
+          ]),
+        };
+      },
+    ),
+);
+
 function countChanges(before, after, regions) {
   const inside = regions.map(() => 0);
   let outside = 0;
