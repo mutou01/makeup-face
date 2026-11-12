@@ -460,10 +460,15 @@ test(
         const env = await makeupFixture(profile, ["portrait"]);
         await writeFile(
           join(profile, "portrait.png"),
-          Buffer.from(
-            "iVBORw0KGgoAAAANSUhEUgAAAPAAAADwAQMAAAAEm3vRAAAABlBMVEWnX2QAAACveaDXAAAAOGVYSWZNTQAqAAAACAACARIAAwAAAAEAAQAAATsAAgAAABEAAAAmAAAAAFBSSVZBVEVfVEVTVF9UQUcAAKN9y4EAAAAeSURBVHja7cEBDQAAAMKg909tDwcUAAAAAAAAwKcBHRAAAVCb7wMAAAAASUVORK5CYII=",
-            "base64",
-          ),
+          fixturePNG(240, 240, detailRGB, [
+            [
+              "eXIf",
+              Buffer.from(
+                "4d4d002a000000080002011200030000000100010000013b0002000000110000002600000000505249564154455f544553545f5441470000",
+                "hex",
+              ),
+            ],
+          ]),
         );
         const existing = join(profile, "existing.png");
         await writeFile(existing, "keep me");
@@ -622,6 +627,86 @@ test(
         ]),
     ),
 );
+
+test(
+  "过暗、过亮和模糊分别提示重拍，已存项目保持不变",
+  { timeout: 45_000 },
+  () =>
+    withDesktop(
+      async (page, profile) => {
+        const project = page.getByRole("region", { name: "本机项目" });
+        const projectFile = join(profile, "quality-workspace", "project.json");
+        const pick = page.getByRole("button", { name: "选择本机照片" });
+        const analyse = page.getByRole("button", { name: "分析面部" });
+        const original = page.getByRole("img", { name: "本机原图预览" });
+        const preview = page.getByRole("img", { name: "试妆预览" });
+        const apply = page.getByRole("button", { name: "应用日常豆沙" });
+        await project
+          .getByRole("button", { name: "新建项目" })
+          .click({ timeout: 5_000 });
+        await project
+          .getByText("项目已新建。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        await pick.click({ timeout: 5_000 });
+        await analyse.click({ timeout: 5_000 });
+        await preview.waitFor({ timeout: 5_000 });
+        await apply.click({ timeout: 5_000 });
+        const savedPreview = await pixels(preview);
+        await project
+          .getByRole("button", { name: "保存项目" })
+          .click({ timeout: 5_000 });
+        await project
+          .getByText("项目已保存。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        const saved = await readFile(projectFile);
+
+        for (const message of ["脸部过暗", "脸部过亮", "照片明显模糊"]) {
+          await pick.click({ timeout: 5_000 });
+          await analyse.click({ timeout: 5_000 });
+          await page
+            .getByRole("status", { name: "照片处理状态" })
+            .filter({ hasText: message })
+            .waitFor({ timeout: 5_000 });
+          await original.waitFor({ timeout: 5_000 });
+          await preview.waitFor({ state: "hidden", timeout: 5_000 });
+          assert.equal(await apply.isDisabled(), true);
+          assert.deepEqual(await readFile(projectFile), saved);
+        }
+        await project
+          .getByRole("button", { name: "关闭项目" })
+          .click({ timeout: 5_000 });
+        await project
+          .getByRole("button", { name: "打开项目" })
+          .click({ timeout: 5_000 });
+        await preview.waitFor({ timeout: 5_000 });
+        assert.ok(
+          (await pixels(preview)).bytes.equals(savedPreview.bytes),
+          "合格照片仍可恢复相同试妆",
+        );
+      },
+      async (profile) => {
+        const workspace = join(profile, "quality-workspace");
+        await mkdir(workspace);
+        return {
+          ...(await makeupFixture(profile, [
+            "portrait",
+            "dark",
+            "bright",
+            "blurred",
+          ])),
+          MAKEUPMIRROR_SMOKE_PROJECT_DIRS: JSON.stringify([
+            workspace,
+            workspace,
+          ]),
+        };
+      },
+    ),
+);
+
+function detailRGB(x, y) {
+  const offset = (Math.floor(x / 4) + Math.floor(y / 4)) % 2 ? 18 : -18;
+  return [167 + offset, 95 + offset, 100 + offset];
+}
 
 function fixturePNG(width, height, rgbAt, extraChunks = []) {
   function chunk(name, bytes) {
@@ -1120,13 +1205,7 @@ async function makeupFixture(
   const noFace = join(profile, "no-face.png");
   const multiple = join(profile, "multiple.png");
   const partial = join(profile, "partial.png");
-  await writeFile(
-    portrait,
-    Buffer.from(
-      "iVBORw0KGgoAAAANSUhEUgAAAPAAAADwAQMAAAAEm3vRAAAABlBMVEWnX2QAAACveaDXAAAAHklEQVR42u3BAQ0AAADCoPdPbQ8HFAAAAAAAAMCnAR0QAAFQm+8DAAAAAElFTkSuQmCC",
-      "base64",
-    ),
-  );
+  await writeFile(portrait, fixturePNG(240, 240, detailRGB));
   await writeFile(
     noFace,
     Buffer.from(
@@ -1142,13 +1221,7 @@ async function makeupFixture(
     ),
   );
   if (order.includes("partial"))
-    await writeFile(
-      partial,
-      Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAPAAAADvAQMAAAD2G8ufAAAABlBMVEWnX2QAAACveaDXAAAAHklEQVR42u3BAQ0AAADCoPdPbQ43oAAAAAAAAABODRzxAAErZx48AAAAAElFTkSuQmCC",
-        "base64",
-      ),
-    );
+    await writeFile(partial, fixturePNG(240, 239, detailRGB));
   const framing = {
     "too-small": 241,
     edge: 242,
@@ -1161,6 +1234,22 @@ async function makeupFixture(
       await writeFile(
         join(profile, `${name}.png`),
         fixturePNG(width, 240, () => [167, 95, 100]),
+      );
+  }
+  const imageQuality = {
+    dark: [246, 19],
+    bright: [247, 249],
+    blurred: [248, 125],
+  };
+  for (const [name, [width, tone]] of Object.entries(imageQuality)) {
+    if (order.includes(name))
+      await writeFile(
+        join(profile, `${name}.png`),
+        fixturePNG(width, 240, (x, y) => {
+          const value =
+            tone + Math.round(4 * Math.sin(x / 23) * Math.cos(y / 31));
+          return [value, value, value];
+        }),
       );
   }
   await writeFile(join(profile, "face_landmarker.task"), "test boundary only");
@@ -1206,7 +1295,7 @@ async function makeupFixture(
       `,
   );
   const files = { portrait, "no-face": noFace, multiple, partial };
-  for (const name of Object.keys(framing))
+  for (const name of [...Object.keys(framing), ...Object.keys(imageQuality)])
     files[name] = join(profile, `${name}.png`);
   return {
     MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify(

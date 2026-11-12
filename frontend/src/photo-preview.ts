@@ -1,5 +1,5 @@
 import { detectFaces, prepareFaceFrame } from "./face-analysis";
-import { checkFraming } from "./face-quality";
+import { checkFraming, checkImageQuality } from "./face-quality";
 import { prepareMakeup, type LayerSettings } from "./makeup-preview";
 import { mountRecommendations } from "./recommendation-panel";
 import type { Preset, PresetLayer } from "./recommendations";
@@ -252,6 +252,11 @@ export function mountPhotoPreview(section: HTMLElement) {
         const framing = checkFraming(frame.width, frame.height, points, pose);
         if (!framing.ok) {
           status.textContent = framing.message;
+          return;
+        }
+        const imageQuality = checkImageQuality(frame, framing.bounds);
+        if (imageQuality) {
+          status.textContent = imageQuality;
           return;
         }
         render = prepareMakeup(canvas, frame, points);
