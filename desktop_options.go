@@ -2,7 +2,12 @@
 
 package main
 
-import "github.com/wailsapp/wails/v3/pkg/application"
+import (
+	"os"
+	"path/filepath"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+)
 
 func desktopOptions() application.WindowsOptions {
 	return application.WindowsOptions{}
@@ -10,4 +15,12 @@ func desktopOptions() application.WindowsOptions {
 
 func desktopPhotoPicker(window application.Window) func() (string, error) {
 	return nativePhotoPicker(window)
+}
+
+func desktopFaceRuntime() (string, bool) {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", false
+	}
+	return filepath.Join(cache, "MakeupMirror", "face-runtime", "v1"), false
 }

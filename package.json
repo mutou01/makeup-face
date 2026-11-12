@@ -8,6 +8,7 @@
   },
   "scripts": {
     "setup": "npm ci && go mod download",
+    "setup:face-model": "node scripts/setup-face-model.mjs",
     "build:frontend": "vite build frontend",
     "build:app": "node scripts/build-app.mjs",
     "build:smoke": "node scripts/build-app.mjs smoke",
@@ -23,6 +24,7 @@
     "clean": "node scripts/clean.mjs"
   },
   "devDependencies": {
+    "@mediapipe/tasks-vision": "1.2.3",
     "playwright-core": "1.65.0",
     "prettier": "3.10.1",
     "typescript": "6.0.3",

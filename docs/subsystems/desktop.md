@@ -1,6 +1,6 @@
 # 桌面启动
 
-[Go 入口](../../main.go)启动 Wails 窗口，从 EXE 内嵌资源加载 Vite 的构建输出。[前端入口](../../frontend/src/main.ts)提供[本机原图预览](photo-input.md)、[合成图口红试妆](lipstick-preview.md)和中文说明。普通构建不提供项目写入、供应商接口或调试端口。
+[Go 入口](../../main.go)启动 Wails 窗口，从 EXE 内嵌资源加载 Vite 的构建输出。[前端入口](../../frontend/src/main.ts)提供[本机原图预览](photo-input.md)、[真人照片口红试妆](lipstick-preview.md)和中文说明。普通构建不提供项目写入、供应商接口或调试端口。
 
 [构建脚本](../../scripts/build-app.mjs)生成 Windows amd64 程序。真实窗口验收使用另一个带 `desktop_smoke` 标签的构建；它仅通过[测试选项](../../desktop_smoke_options.go)打开本机调试端口和独立的临时配置目录。[启动测试](../../tests/desktop.test.mjs)使用 Playwright 连接该窗口，检查可见内容，结束时停止子进程并移除临时目录。
 

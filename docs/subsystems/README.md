@@ -1,7 +1,7 @@
 # Subsystem design references
 
 - [桌面启动](desktop.md)：当前窗口、构建与验收。
-- [合成图口红试妆](lipstick-preview.md)：合成图、唇区边界和颜色叠加。
+- [真人照片口红试妆](lipstick-preview.md)：本机模型、唇区边界和颜色叠加。
 - [日志与供应商](foundation.md)：MVP 设计，尚未实现。
 
 These pages describe what each part of the project is responsible for, how it
