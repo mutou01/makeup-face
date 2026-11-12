@@ -1,4 +1,5 @@
 import "./style.css";
+import { mountPhotoPreview } from "./photo-preview";
 import { sampleLipstick } from "./sample-lipstick";
 
 const app = document.querySelector("#app");
@@ -9,6 +10,7 @@ app.innerHTML = `
     <p class="label">本机妆容工作台</p>
     <h1>MakeupMirror</h1>
   </header>
+  <section id="photo-preview" aria-labelledby="photo-preview-title"></section>
   <section aria-labelledby="lipstick-title">
     <h2 id="lipstick-title">口红试妆</h2>
     <p class="sample-note">内置合成图。关闭口红可随时对比原图。</p>
@@ -30,13 +32,14 @@ app.innerHTML = `
   <section aria-labelledby="getting-started">
     <h2 id="getting-started">如何开始</h2>
     <ol>
-      <li>选择一个本机项目文件夹，导入一张正面照。</li>
-      <li>比较推荐妆容，分别调整口红、眼影和腮红。</li>
-      <li>保存妆容草稿，或导出预览图。</li>
+      <li>点击「选择本机照片」，导入一张正面照查看原图。</li>
+      <li>要体验妆容控件，可在合成图上试涂口红。</li>
     </ol>
-    <p class="status">目前可用合成图试涂口红，照片导入与其他妆容功能将在后续开放。</p>
+    <p class="status">原图只供本次预览。真实照片试妆和项目保存将在后续开放。</p>
   </section>
 `;
+
+mountPhotoPreview(app.querySelector<HTMLElement>("#photo-preview")!);
 
 const canvas = app.querySelector<HTMLCanvasElement>("canvas")!;
 const enabled = app.querySelector<HTMLInputElement>("#lipstick-enabled")!;

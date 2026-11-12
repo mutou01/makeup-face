@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, mkdtemp, realpath, rm } from "node:fs/promises";
+import { access, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -40,7 +40,7 @@ async function connect(endpoint, getExit) {
   assert.fail("桌面应用未在 20 秒内打开 WebView2 调试连接");
 }
 
-async function withDesktop(run) {
+async function withDesktop(run, prepare = async () => ({})) {
   await assert.doesNotReject(
     access(executable),
     "缺少待验收的 MakeupMirror 桌面程序",
@@ -57,6 +57,7 @@ async function withDesktop(run) {
     child = spawn(executable, [], {
       env: {
         ...process.env,
+        ...(await prepare(profile)),
         MAKEUPMIRROR_SMOKE_PORT: String(port),
         MAKEUPMIRROR_SMOKE_PROFILE: profile,
       },
@@ -92,6 +93,90 @@ async function withDesktop(run) {
     });
   }
 }
+
+test(
+  "本机照片可预览和替换，取消或格式不符时保留原预览，清除后不可再读取",
+  { timeout: 45_000 },
+  () =>
+    withDesktop(
+      async (page) => {
+        const pick = page.getByRole("button", { name: "选择本机照片" });
+        const clear = page.getByRole("button", { name: "清除预览" });
+        const preview = page.getByRole("img", { name: "本机原图预览" });
+        const assertImage = async (width, height) => {
+          await preview.waitFor({ timeout: 5_000 });
+          assert.deepEqual(
+            await preview.evaluate((img) => [
+              img.naturalWidth,
+              img.naturalHeight,
+            ]),
+            [width, height],
+          );
+          return preview.getAttribute("src");
+        };
+
+        await pick.click({ timeout: 5_000 });
+        const first = await assertImage(2, 3);
+        const response = await page.evaluate(async (url) => {
+          const result = await fetch(url);
+          return [result.status, result.headers.get("cache-control")];
+        }, first);
+        assert.deepEqual(response, [200, "no-store"]);
+
+        await pick.click({ timeout: 5_000 });
+        await page
+          .getByText("未更换照片。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        assert.equal(await assertImage(2, 3), first);
+
+        await pick.click({ timeout: 5_000 });
+        await page
+          .getByText("扩展名必须与文件内容一致", { exact: false })
+          .waitFor({ timeout: 5_000 });
+        assert.equal(await assertImage(2, 3), first);
+
+        await pick.click({ timeout: 5_000 });
+        await page
+          .getByText("原图已加载（3 × 2）。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        const replacement = await assertImage(3, 2);
+        assert.notEqual(first, replacement);
+        const responseStatus = (url) =>
+          page.evaluate(async (path) => (await fetch(path)).status, url);
+        assert.equal(await responseStatus(first), 404);
+
+        await clear.click({ timeout: 5_000 });
+        await preview.waitFor({ state: "hidden", timeout: 5_000 });
+        assert.equal(await responseStatus(replacement), 404);
+      },
+      async (profile) => {
+        const first = join(profile, "first.png");
+        const invalid = join(profile, "renamed.jpg");
+        const replacement = join(profile, "replacement.png");
+        const portrait = Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAIAAAA2iEnWAAAAFElEQVR4nGOsULJgYGBgYmBgQFAAECoA2HBD9oMAAAAASUVORK5CYII=",
+          "base64",
+        );
+        await writeFile(first, portrait);
+        await writeFile(invalid, portrait);
+        await writeFile(
+          replacement,
+          Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAFUlEQVR4nGNUqrBgYGBgYGBgYoABAA7qANbzEZPkAAAAAElFTkSuQmCC",
+            "base64",
+          ),
+        );
+        return {
+          MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify([
+            first,
+            "",
+            invalid,
+            replacement,
+          ]),
+        };
+      },
+    ),
+);
 
 test(
   "Windows 桌面窗口显示 MakeupMirror 与中文使用说明",

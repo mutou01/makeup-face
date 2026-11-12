@@ -16,15 +16,19 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	preview := &PhotoPreviewService{}
 	app := application.New(application.Options{
 		Name:        "MakeupMirror",
 		Description: "本机妆容工作台",
 		Assets: application.AssetOptions{
-			Handler: application.BundledAssetFileServer(assets),
+			Handler:        application.BundledAssetFileServer(assets),
+			Middleware:     preview.assets,
+			DisableLogging: true,
 		},
-		Windows: desktopOptions(),
+		Services: []application.Service{application.NewService(preview)},
+		Windows:  desktopOptions(),
 	})
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "MakeupMirror",
 		URL:       "/",
 		Width:     840,
@@ -32,6 +36,7 @@ func main() {
 		MinWidth:  520,
 		MinHeight: 420,
 	})
+	preview.pick = desktopPhotoPicker(window)
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
