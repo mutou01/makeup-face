@@ -1,5 +1,5 @@
 import { detectFaces, prepareFaceFrame } from "./face-analysis";
-import { prepareLipstick, type PaintLipstick } from "./lipstick";
+import { prepareMakeup } from "./makeup-preview";
 
 type PickResult = { url?: string; message?: string };
 
@@ -11,48 +11,89 @@ async function call<T>(operation: "Pick" | "Clear"): Promise<T> {
   return runtime.Call.ByName(`main.PhotoPreviewService.${operation}`);
 }
 
+function layerMarkup(
+  id: string,
+  title: string,
+  color: string,
+  strength: number,
+) {
+  return `
+    <fieldset id="${id}" class="makeup-layer">
+      <legend>${title}</legend>
+      <div class="controls">
+        <label class="toggle"><input type="checkbox" /> 启用${title}</label>
+        <label class="color-field">${title}颜色 <input type="color" value="${color}" /></label>
+        <div>
+          <div class="intensity-field">
+            <label for="${id}-strength">${title}强度</label>
+            <output for="${id}-strength" aria-hidden="true">${strength}%</output>
+          </div>
+          <input id="${id}-strength" type="range" min="0" max="100" value="${strength}" />
+        </div>
+      </div>
+    </fieldset>`;
+}
+
+function layerControls(editor: HTMLElement, id: string, onInput: () => void) {
+  const fieldset = editor.querySelector<HTMLFieldSetElement>(`#${id}`)!;
+  const enabled = fieldset.querySelector<HTMLInputElement>(
+    'input[type="checkbox"]',
+  )!;
+  const color = fieldset.querySelector<HTMLInputElement>(
+    'input[type="color"]',
+  )!;
+  const strength = fieldset.querySelector<HTMLInputElement>(
+    'input[type="range"]',
+  )!;
+  const output = fieldset.querySelector("output")!;
+  strength.addEventListener("input", () => {
+    output.value = `${strength.value}%`;
+  });
+  for (const input of [enabled, color, strength])
+    input.addEventListener("input", onInput);
+  return {
+    fieldset,
+    reset: () => {
+      enabled.checked = false;
+    },
+    settings: () => ({
+      enabled: enabled.checked,
+      color: color.value,
+      strength: strength.valueAsNumber,
+    }),
+  };
+}
+
 export function mountPhotoPreview(section: HTMLElement) {
   section.innerHTML = `
     <h2 id="photo-preview-title">本机照片</h2>
     <p class="sample-note">支持 JPEG、PNG、WebP。照片仅在本机用于本次试妆。</p>
     <div class="photo-actions">
       <button type="button" id="pick-photo">选择本机照片</button>
-      <button type="button" id="analyse-lips" disabled>分析唇部</button>
+      <button type="button" id="analyse-face" disabled>分析面部</button>
       <button type="button" id="clear-photo" disabled>清除预览</button>
     </div>
     <p id="photo-status" class="status" role="status"></p>
     <div id="photo-display"></div>
-    <div id="lipstick-editor" hidden>
-      <canvas role="img" aria-label="口红试妆预览" class="photo-preview-image"></canvas>
-      <div class="controls">
-        <label class="toggle"><input id="lipstick-enabled" type="checkbox" /> 启用口红</label>
-        <label class="color-field">口红颜色 <input id="lipstick-color" type="color" value="#ae344d" /></label>
-        <div>
-          <div class="intensity-field">
-            <label for="lipstick-strength">口红强度</label>
-            <output id="lipstick-strength-value" for="lipstick-strength" aria-hidden="true">65%</output>
-          </div>
-          <input id="lipstick-strength" type="range" min="0" max="100" value="65" />
-        </div>
+    <div id="makeup-editor" hidden>
+      <canvas role="img" aria-label="试妆预览" class="photo-preview-image"></canvas>
+      <div class="makeup-layers">
+        ${layerMarkup("lipstick", "口红", "#ae344d", 65)}
+        ${layerMarkup("blush", "腮红", "#d66c83", 55)}
       </div>
     </div>
   `;
   const pick = section.querySelector<HTMLButtonElement>("#pick-photo")!;
   const clear = section.querySelector<HTMLButtonElement>("#clear-photo")!;
-  const analyse = section.querySelector<HTMLButtonElement>("#analyse-lips")!;
+  const analyse = section.querySelector<HTMLButtonElement>("#analyse-face")!;
   const status = section.querySelector("#photo-status")!;
   const display = section.querySelector<HTMLElement>("#photo-display")!;
-  const editor = section.querySelector<HTMLElement>("#lipstick-editor")!;
+  const editor = section.querySelector<HTMLElement>("#makeup-editor")!;
   const canvas = editor.querySelector("canvas")!;
-  const enabled = editor.querySelector<HTMLInputElement>("#lipstick-enabled")!;
-  const color = editor.querySelector<HTMLInputElement>("#lipstick-color")!;
-  const strength =
-    editor.querySelector<HTMLInputElement>("#lipstick-strength")!;
-  const strengthValue = editor.querySelector<HTMLOutputElement>(
-    "#lipstick-strength-value",
-  )!;
+  const lipstick = layerControls(editor, "lipstick", updatePreview);
+  const blush = layerControls(editor, "blush", updatePreview);
   let original: HTMLImageElement | undefined;
-  let render: PaintLipstick | undefined;
+  let render: ReturnType<typeof prepareMakeup> = null;
 
   function setBusy(busy: boolean) {
     pick.disabled = busy;
@@ -62,25 +103,23 @@ export function mountPhotoPreview(section: HTMLElement) {
 
   function setOriginal(image?: HTMLImageElement) {
     original = image;
-    render = undefined;
+    render = null;
     editor.hidden = true;
     canvas.width = canvas.height = 0;
-    enabled.checked = false;
+    lipstick.reset();
+    blush.reset();
     display.hidden = false;
     display.replaceChildren(...(image ? [image] : []));
   }
 
   function updatePreview() {
-    strengthValue.value = `${strength.value}%`;
-    render?.(enabled.checked, color.value, strength.valueAsNumber);
+    render?.paint({ lipstick: lipstick.settings(), blush: blush.settings() });
   }
-  for (const control of [enabled, color, strength])
-    control.addEventListener("input", updatePreview);
 
   analyse.addEventListener("click", async () => {
     if (!original) return;
     setBusy(true);
-    status.textContent = "正在本机分析唇部…";
+    status.textContent = "正在本机分析面部…";
     try {
       const frame = prepareFaceFrame(original);
       const faces = await detectFaces(frame);
@@ -91,15 +130,18 @@ export function mountPhotoPreview(section: HTMLElement) {
       } else if (faces.length > 1) {
         status.textContent = "检测到多张人脸，请换一张单人正面照。";
       } else {
-        render = prepareLipstick(canvas, frame, faces[0]) ?? undefined;
+        render = prepareMakeup(canvas, frame, faces[0]);
         if (!render) {
           status.textContent = "唇部轮廓不完整，请换一张清晰的正面照。";
           return;
         }
+        blush.fieldset.hidden = !render.hasBlush;
         updatePreview();
         display.hidden = true;
         editor.hidden = false;
-        status.textContent = "唇部已定位，可以启用口红。";
+        status.textContent = render.hasBlush
+          ? "唇部和双颊已定位，可以启用口红或腮红。"
+          : "唇部已定位，双颊轮廓不完整，仍可启用口红。";
       }
     } catch {
       status.textContent = "本机人脸分析未能完成，可继续查看原图。";

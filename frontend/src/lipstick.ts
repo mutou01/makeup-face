@@ -1,9 +1,4 @@
-type Point = { x: number; y: number };
-export type PaintLipstick = (
-  enabled: boolean,
-  color: string,
-  strength: number,
-) => void;
+import type { Point } from "./face-analysis";
 
 // Contour topology from MediaPipe Face Landmarker, ordered into two closed rings.
 const outerRing = [
@@ -36,15 +31,15 @@ function contour(
   return path;
 }
 
-export function prepareLipstick(
-  canvas: HTMLCanvasElement,
-  frame: HTMLCanvasElement,
+export function lipstickMask(
+  width: number,
+  height: number,
   points: Point[],
-): PaintLipstick | null {
-  const { width, height } = frame;
+): Uint8ClampedArray | null {
   const outer = contour(points, outerRing, width, height);
   const inner = contour(points, innerRing, width, height);
   if (!outer || !inner) return null;
+  const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -53,31 +48,8 @@ export function prepareLipstick(
   ctx.globalCompositeOperation = "destination-out";
   ctx.fill(inner);
   ctx.globalCompositeOperation = "source-over";
-  const mask = ctx.getImageData(0, 0, width, height).data;
-  const affected: number[] = [];
-  for (let i = 0; i < mask.length; i += 4) if (mask[i + 3]) affected.push(i);
-  if (affected.length === 0) return null;
-
-  ctx.clearRect(0, 0, width, height);
-  ctx.drawImage(frame, 0, 0);
-  const original = ctx.getImageData(0, 0, width, height);
-  const output = ctx.createImageData(width, height);
-  output.data.set(original.data);
-  return (enabled, color, strength) => {
-    if (!enabled || strength === 0) {
-      ctx.putImageData(original, 0, 0);
-      return;
-    }
-    const target = [1, 3, 5].map((start) =>
-      Number.parseInt(color.slice(start, start + 2), 16),
-    );
-    for (const i of affected) {
-      const amount = (mask[i + 3] / 255) * (strength / 100) * 0.85;
-      for (let c = 0; c < 3; c++) {
-        const source = original.data[i + c];
-        output.data[i + c] = source + (target[c] - source) * amount;
-      }
-    }
-    ctx.putImageData(output, 0, 0);
-  };
+  const rgba = ctx.getImageData(0, 0, width, height).data;
+  const mask = new Uint8ClampedArray(width * height);
+  for (let i = 0; i < mask.length; i++) mask[i] = rgba[i * 4 + 3];
+  return mask.some(Boolean) ? mask : null;
 }

@@ -126,7 +126,7 @@ test(
         assert.deepEqual(response, [200, "no-store"]);
 
         await page
-          .getByRole("button", { name: "分析唇部" })
+          .getByRole("button", { name: "分析面部" })
           .click({ timeout: 5_000 });
         await page
           .getByText("本机人脸模型尚未安装", { exact: false })
@@ -218,11 +218,29 @@ async function pixels(canvas) {
   return { ...result, bytes: Buffer.from(result.bytes, "base64") };
 }
 
+function countChanges(before, after, regions) {
+  const inside = regions.map(() => 0);
+  let outside = 0;
+  for (let i = 0; i < before.bytes.length; i += 4) {
+    if (before.bytes.readUInt32LE(i) === after.bytes.readUInt32LE(i)) continue;
+    const p = i / 4;
+    const x = (p % before.width) / before.width;
+    const y = Math.floor(p / before.width) / before.height;
+    const region = regions.findIndex(
+      ([left, top, right, bottom]) =>
+        x >= left && x <= right && y >= top && y <= bottom,
+    );
+    if (region < 0) outside++;
+    else inside[region]++;
+  }
+  return { inside, outside };
+}
+
 const realPhoto = process.env.MAKEUPMIRROR_REAL_PHOTO;
 const realRuntime = process.env.MAKEUPMIRROR_REAL_FACE_DIR;
 if (realPhoto || realRuntime) {
   test(
-    "真人照片经本机模型定位后只在人工标定的嘴部范围改变像素",
+    "真人照片经本机模型定位后只在人工标定的妆容范围改变像素",
     { timeout: 60_000 },
     () =>
       withDesktop(
@@ -263,9 +281,9 @@ if (realPhoto || realRuntime) {
           });
           await pick.click({ timeout: 5_000 });
           await page
-            .getByRole("button", { name: "分析唇部" })
+            .getByRole("button", { name: "分析面部" })
             .click({ timeout: 10_000 });
-          const canvas = page.getByRole("img", { name: "口红试妆预览" });
+          const canvas = page.getByRole("img", { name: "试妆预览" });
           await canvas.waitFor({ timeout: 25_000 }).catch(async () => {
             assert.fail(
               `真实模型未生成预览：${await page.getByRole("status").textContent()}；${runtimeFailures.join("；")}`,
@@ -276,25 +294,10 @@ if (realPhoto || realRuntime) {
           const enabled = page.getByRole("checkbox", { name: "启用口红" });
           await enabled.check({ timeout: 5_000 });
           const painted = await pixels(canvas);
-          let changed = 0;
-          let outside = 0;
-          for (let i = 0; i < original.bytes.length; i += 4) {
-            if (
-              original.bytes.readUInt32LE(i) === painted.bytes.readUInt32LE(i)
-            )
-              continue;
-            changed++;
-            const p = i / 4;
-            const x = (p % original.width) / original.width;
-            const y = Math.floor(p / original.width) / original.height;
-            if (
-              x < region[0] ||
-              x > region[2] ||
-              y < region[1] ||
-              y > region[3]
-            )
-              outside++;
-          }
+          const {
+            inside: [changed],
+            outside,
+          } = countChanges(original, painted, [region]);
           assert.ok(changed >= 25, `实际改变像素太少：${changed}`);
           assert.equal(outside, 0, "人工标定的嘴部范围外必须保持不变");
           await enabled.uncheck({ timeout: 5_000 });
@@ -306,6 +309,48 @@ if (realPhoto || realRuntime) {
           console.log(
             `真人验收：${original.width} × ${original.height}，嘴部范围内 ${changed} 个像素变化，范围外 ${outside}，无外部请求。`,
           );
+
+          const blushBounds = process.env.MAKEUPMIRROR_REAL_BLUSH_BOUNDS;
+          if (blushBounds) {
+            const cheeks = blushBounds
+              .split(";")
+              .map((entry) => entry.split(",").map(Number));
+            assert.ok(
+              cheeks.length === 2 &&
+                cheeks.every(
+                  (box) =>
+                    box.length === 4 &&
+                    box.every((n) => Number.isFinite(n) && n >= 0 && n <= 1) &&
+                    box[0] < box[2] &&
+                    box[1] < box[3],
+                ),
+              "请提供两个有效的归一化脸颊范围",
+            );
+            await enabled.check({ timeout: 5_000 });
+            const lipOnly = await pixels(canvas);
+            const blush = page.getByRole("checkbox", { name: "启用腮红" });
+            await blush.check({ timeout: 5_000 });
+            const both = await pixels(canvas);
+            const cheekChanges = countChanges(lipOnly, both, cheeks);
+            assert.ok(
+              cheekChanges.inside.every((count) => count >= 25),
+              `双颊变化不足：${cheekChanges.inside}`,
+            );
+            assert.equal(
+              cheekChanges.outside,
+              0,
+              "人工标定的双颊范围外必须保持不变",
+            );
+            await blush.uncheck({ timeout: 5_000 });
+            assert.ok(
+              (await pixels(canvas)).bytes.equals(lipOnly.bytes),
+              "真人照片关闭腮红后口红保持原样",
+            );
+            assert.deepEqual(external, []);
+            console.log(
+              `真人腮红验收：双颊范围内分别变化 ${cheekChanges.inside.join("、")} 个像素，范围外 0，关闭后保留口红。`,
+            );
+          }
         },
         async () => ({
           MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify([realPhoto]),
@@ -316,14 +361,14 @@ if (realPhoto || realRuntime) {
 }
 
 test(
-  "选入照片后仅单人能试涂口红，唇区外和口腔像素不变",
+  "单人照片上口红和双颊腮红可独立编辑，作用范围外不变",
   { timeout: 45_000 },
   () =>
     withDesktop(
       async (page) => {
         const pick = page.getByRole("button", { name: "选择本机照片" });
-        const analyse = page.getByRole("button", { name: "分析唇部" });
-        const preview = page.getByRole("img", { name: "口红试妆预览" });
+        const analyse = page.getByRole("button", { name: "分析面部" });
+        const preview = page.getByRole("img", { name: "试妆预览" });
         const enabled = page.getByRole("checkbox", { name: "启用口红" });
         const color = page.getByLabel("口红颜色");
         const intensity = page.getByRole("slider", { name: "口红强度" });
@@ -381,6 +426,59 @@ test(
         assert.ok(
           (await pixels(preview)).bytes.equals(strongest.bytes),
           "重新启用不能重复叠涂",
+        );
+
+        const blush = page.getByRole("checkbox", { name: "启用腮红" });
+        const blushColor = page.getByLabel("腮红颜色");
+        const blushStrength = page.getByRole("slider", { name: "腮红强度" });
+        await blush.waitFor({ timeout: 5_000 });
+        assert.equal(await blush.isChecked(), false);
+        await blush.check({ timeout: 5_000 });
+        const both = await pixels(preview);
+        let left = 0;
+        let right = 0;
+        let spill = 0;
+        for (let y = 0; y < original.height; y++) {
+          for (let x = 0; x < original.width; x++) {
+            const i = (y * original.width + x) * 4;
+            if (both.bytes.readUInt32LE(i) === strongest.bytes.readUInt32LE(i))
+              continue;
+            if (y >= 117 && y <= 149 && x >= 46 && x <= 86) left++;
+            else if (y >= 117 && y <= 149 && x >= 154 && x <= 194) right++;
+            else spill++;
+          }
+        }
+        assert.ok(left > 0 && right > 0, "腮红应同时改变两侧脸颊");
+        assert.equal(spill, 0, "腮红不应改变双颊之外或口红层的像素");
+        const cheekPoint = (133 * original.width + 66) * 4;
+        await blushColor.fill("#2556bf", { timeout: 5_000 });
+        const blueBlush = await pixels(preview);
+        assert.ok(blueBlush.bytes[cheekPoint + 2] > both.bytes[cheekPoint + 2]);
+        await blushStrength.press("Home", { timeout: 5_000 });
+        assert.ok(
+          (await pixels(preview)).bytes.equals(strongest.bytes),
+          "腮红归零后只保留口红",
+        );
+        await blushStrength.press("End", { timeout: 5_000 });
+        const fullBlush = await pixels(preview);
+        assert.ok(
+          fullBlush.bytes[cheekPoint + 2] > blueBlush.bytes[cheekPoint + 2],
+        );
+        await enabled.uncheck({ timeout: 5_000 });
+        assert.equal(
+          (await pixels(preview)).bytes.readUInt32LE(cheekPoint),
+          fullBlush.bytes.readUInt32LE(cheekPoint),
+        );
+        await enabled.check({ timeout: 5_000 });
+        await blush.uncheck({ timeout: 5_000 });
+        assert.ok(
+          (await pixels(preview)).bytes.equals(strongest.bytes),
+          "关闭腮红后口红保持原样",
+        );
+        await enabled.uncheck({ timeout: 5_000 });
+        assert.ok(
+          (await pixels(preview)).bytes.equals(original.bytes),
+          "两层关闭后恢复原图",
         );
 
         for (const message of ["没有检测到人脸", "检测到多张人脸"]) {
@@ -441,6 +539,9 @@ test(
               const angle = i / ids.length * Math.PI * 2 + Math.PI;
               face[id] = {x: (120 + Math.cos(angle) * rx) / 240, y: (160 + Math.sin(angle) * ry) / 240};
             });
+            for (const [id, x, y] of [[33, 66, 95], [263, 174, 95], [205, 66, 133], [425, 174, 133], [234, 45, 133], [454, 195, 133]]) {
+              face[id] = {x: x / 240, y: y / 240};
+            }
             return {faceLandmarks: image.width === 240 ? [face] : image.width === 2 ? [] : [face, face]};
           },
           close() {},
