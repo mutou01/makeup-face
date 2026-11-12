@@ -37,7 +37,7 @@ flowchart LR
 
 妆容图层最小契约：`{ id, kind, colorSrgb, opacity, coverage, blend }`。`kind` 为口红、眼影或腮红，`opacity` 限 `[0, 1]`，`coverage` 的可调范围由各区域安全蒙版限制。MVP 将颜色定义为 `#RRGGBB` sRGB；统一 EXIF 方向和预览坐标，明确工作分辨率。若以后引入 UV 图层，复用妆容意图和编辑交互，在 3D 后端定义自己的材质表达；不要求 2D 蒙版直接兼容。
 
-照片输入的格式、容量、尺寸、静态解码和原图预览契约见[本机照片校验](subsystems/photo-input.md)。选图和原图预览不依赖模型；用户主动分析面部时才加载经过校验的本机模型。[口红](subsystems/lipstick-preview.md)和[腮红](subsystems/blush-preview.md)共用同一次分析，在工作原图上独立合成，试妆不保存项目数据。
+照片输入的格式、容量、尺寸、静态解码和原图预览契约见[本机照片校验](subsystems/photo-input.md)。选图和原图预览不依赖模型；用户主动分析面部时才加载经过校验的本机模型。[口红](subsystems/lipstick-preview.md)、[腮红](subsystems/blush-preview.md)和[眼影](subsystems/eyeshadow-preview.md)共用同一次分析，在工作原图上独立合成，试妆不保存项目数据。
 
 ## 选型与退出条件
 

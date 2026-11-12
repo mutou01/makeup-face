@@ -1,6 +1,6 @@
 # MakeupMirror
 
-MakeupMirror 是本机妆容工作台。当前版本可以预览本机照片，在单人照片上分别调整口红和腮红。眼影、本机项目管理和可选 AI 解释在后续 MVP 实现。
+MakeupMirror 是本机妆容工作台。当前版本可以预览本机照片，在单人照片上分别调整口红、腮红和眼影。推荐、本机项目管理和可选 AI 解释在后续 MVP 实现。
 
 开发环境：Windows x64、系统 WebView2、Go 1.26.11 或兼容的新版本、Node.js 24。项目使用 [proj-template](https://github.com/mutou01/proj-template/tree/0cd58426f9346e81261a197d5fd72f5b5eaee19f) 的文档与门禁结构，保留[模板许可](TEMPLATE-LICENSE.txt)。
 

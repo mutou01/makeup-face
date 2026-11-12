@@ -236,6 +236,24 @@ function countChanges(before, after, regions) {
   return { inside, outside };
 }
 
+function pairOfRegions(bounds) {
+  const regions = bounds
+    .split(";")
+    .map((entry) => entry.split(",").map(Number));
+  assert.ok(
+    regions.length === 2 &&
+      regions.every(
+        (box) =>
+          box.length === 4 &&
+          box.every((n) => Number.isFinite(n) && n >= 0 && n <= 1) &&
+          box[0] < box[2] &&
+          box[1] < box[3],
+      ),
+    "请提供两个有效的归一化范围",
+  );
+  return regions;
+}
+
 const realPhoto = process.env.MAKEUPMIRROR_REAL_PHOTO;
 const realRuntime = process.env.MAKEUPMIRROR_REAL_FACE_DIR;
 if (realPhoto || realRuntime) {
@@ -312,20 +330,7 @@ if (realPhoto || realRuntime) {
 
           const blushBounds = process.env.MAKEUPMIRROR_REAL_BLUSH_BOUNDS;
           if (blushBounds) {
-            const cheeks = blushBounds
-              .split(";")
-              .map((entry) => entry.split(",").map(Number));
-            assert.ok(
-              cheeks.length === 2 &&
-                cheeks.every(
-                  (box) =>
-                    box.length === 4 &&
-                    box.every((n) => Number.isFinite(n) && n >= 0 && n <= 1) &&
-                    box[0] < box[2] &&
-                    box[1] < box[3],
-                ),
-              "请提供两个有效的归一化脸颊范围",
-            );
+            const cheeks = pairOfRegions(blushBounds);
             await enabled.check({ timeout: 5_000 });
             const lipOnly = await pixels(canvas);
             const blush = page.getByRole("checkbox", { name: "启用腮红" });
@@ -351,6 +356,42 @@ if (realPhoto || realRuntime) {
               `真人腮红验收：双颊范围内分别变化 ${cheekChanges.inside.join("、")} 个像素，范围外 0，关闭后保留口红。`,
             );
           }
+
+          const eyeshadowBounds =
+            process.env.MAKEUPMIRROR_REAL_EYESHADOW_BOUNDS;
+          if (eyeshadowBounds) {
+            const lids = pairOfRegions(eyeshadowBounds);
+            await enabled.check({ timeout: 5_000 });
+            await page
+              .getByRole("checkbox", { name: "启用腮红" })
+              .check({ timeout: 5_000 });
+            const otherLayers = await pixels(canvas);
+            const eyeshadow = page.getByRole("checkbox", { name: "启用眼影" });
+            await eyeshadow.check({ timeout: 5_000 });
+            const changes = countChanges(
+              otherLayers,
+              await pixels(canvas),
+              lids,
+            );
+            assert.ok(
+              changes.inside.every((count) => count >= 10),
+              `两侧上眼睑变化不足：${changes.inside}`,
+            );
+            assert.equal(
+              changes.outside,
+              0,
+              "人工标定的上眼睑范围外必须保持不变",
+            );
+            await eyeshadow.uncheck({ timeout: 5_000 });
+            assert.ok(
+              (await pixels(canvas)).bytes.equals(otherLayers.bytes),
+              "真人照片关闭眼影后口红和腮红保持原样",
+            );
+            assert.deepEqual(external, []);
+            console.log(
+              `真人眼影验收：双眼上眼睑范围内分别变化 ${changes.inside.join("、")} 个像素，范围外 0，关闭后保留口红和腮红。`,
+            );
+          }
         },
         async () => ({
           MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify([realPhoto]),
@@ -361,7 +402,7 @@ if (realPhoto || realRuntime) {
 }
 
 test(
-  "单人照片上口红和双颊腮红可独立编辑，作用范围外不变",
+  "单人照片上三层妆容可独立编辑，眼球、眉毛和其他区域不变",
   { timeout: 45_000 },
   () =>
     withDesktop(
@@ -481,6 +522,65 @@ test(
           "两层关闭后恢复原图",
         );
 
+        await enabled.check({ timeout: 5_000 });
+        await blush.check({ timeout: 5_000 });
+        const withoutEyeshadow = await pixels(preview);
+        const eyeshadow = page.getByRole("checkbox", { name: "启用眼影" });
+        const shadowColor = page.getByLabel("眼影颜色");
+        const shadowStrength = page.getByRole("slider", { name: "眼影强度" });
+        await eyeshadow.waitFor({ timeout: 5_000 });
+        assert.equal(await eyeshadow.isChecked(), false);
+        await eyeshadow.check({ timeout: 5_000 });
+        const withEyeshadow = await pixels(preview);
+        const shadowChanges = countChanges(withoutEyeshadow, withEyeshadow, [
+          [66 / 240, 82 / 240, 98 / 240, 94 / 240],
+          [142 / 240, 82 / 240, 174 / 240, 94 / 240],
+        ]);
+        assert.ok(
+          shadowChanges.inside.every((count) => count > 0),
+          "两个上眼睑都应改变",
+        );
+        assert.equal(
+          shadowChanges.outside,
+          0,
+          "眼影不得改变眼球、眉毛和其他图层的像素",
+        );
+        for (const x of [82, 158])
+          for (const y of [80, 96]) {
+            const i = (y * original.width + x) * 4;
+            assert.equal(
+              withEyeshadow.bytes.readUInt32LE(i),
+              withoutEyeshadow.bytes.readUInt32LE(i),
+            );
+          }
+        const lidPoint = (88 * original.width + 82) * 4;
+        await shadowColor.fill("#2556bf", { timeout: 5_000 });
+        const blueShadow = await pixels(preview);
+        assert.ok(
+          blueShadow.bytes[lidPoint + 2] > withEyeshadow.bytes[lidPoint + 2],
+        );
+        await shadowStrength.press("Home", { timeout: 5_000 });
+        assert.ok(
+          (await pixels(preview)).bytes.equals(withoutEyeshadow.bytes),
+          "眼影归零不影响其他层",
+        );
+        await shadowStrength.press("End", { timeout: 5_000 });
+        assert.ok(
+          (await pixels(preview)).bytes[lidPoint + 2] >
+            blueShadow.bytes[lidPoint + 2],
+        );
+        await eyeshadow.uncheck({ timeout: 5_000 });
+        assert.ok(
+          (await pixels(preview)).bytes.equals(withoutEyeshadow.bytes),
+          "关闭眼影不影响口红与腮红",
+        );
+        await enabled.uncheck({ timeout: 5_000 });
+        await blush.uncheck({ timeout: 5_000 });
+        assert.ok(
+          (await pixels(preview)).bytes.equals(original.bytes),
+          "三层关闭后恢复原图",
+        );
+
         for (const message of ["没有检测到人脸", "检测到多张人脸"]) {
           await pick.click({ timeout: 5_000 });
           await analyse.click({ timeout: 5_000 });
@@ -541,6 +641,13 @@ test(
             });
             for (const [id, x, y] of [[33, 66, 95], [263, 174, 95], [205, 66, 133], [425, 174, 133], [234, 45, 133], [454, 195, 133]]) {
               face[id] = {x: x / 240, y: y / 240};
+            }
+            for (const [upper, brow, start, direction] of [
+              [[33,246,161,160,159,158,157,173,133], [46,53,52,65,55], 66, 1],
+              [[263,466,388,387,386,385,384,398,362], [276,283,282,295,285], 174, -1],
+            ]) {
+              upper.forEach((id, i) => { face[id] = { x: (start + direction * 4 * i) / 240, y: (95 - 4 * Math.sin(Math.PI * i / 8)) / 240 }; });
+              brow.forEach((id, i) => { face[id] = { x: (start + direction * 8 * i) / 240, y: 81 / 240 }; });
             }
             return {faceLandmarks: image.width === 240 ? [face] : image.width === 2 ? [] : [face, face]};
           },
