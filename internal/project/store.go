@@ -28,6 +28,7 @@ var (
 	ErrInvalid   = errors.New("该目录没有可读取的妆容项目，或项目文件已损坏。")
 	ErrChanged   = errors.New("项目文件已被修改，请重新打开后再保存。")
 	ErrWrite     = errors.New("无法写入项目，请检查目录权限和剩余空间。")
+	ErrNoPhoto   = errors.New("当前项目没有已保存的照片。")
 	colorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 )
 
@@ -37,11 +38,19 @@ type Layer struct {
 	Strength int    `json:"strength"`
 }
 
-type Draft struct {
-	Scene    string           `json:"scene"`
-	Look     string           `json:"look"`
+type Preferences struct {
+	Scene string `json:"scene"`
+	Look  string `json:"look"`
+}
+
+type Makeup struct {
 	Analyzed bool             `json:"analyzed"`
 	Layers   map[string]Layer `json:"layers"`
+}
+
+type Draft struct {
+	Preferences
+	Makeup
 }
 
 type Photo struct {
@@ -50,16 +59,19 @@ type Photo struct {
 }
 
 type Snapshot struct {
-	Kind    string `json:"kind"`
-	Version int    `json:"version"`
-	Photo   *Photo `json:"photo,omitempty"`
-	Draft   *Draft `json:"draft,omitempty"`
+	Kind        string       `json:"kind"`
+	Version     int          `json:"version"`
+	Photo       *Photo       `json:"photo,omitempty"`
+	Draft       *Makeup      `json:"draft,omitempty"`
+	Preferences *Preferences `json:"preferences,omitempty"`
 }
 
 // Store owns a directory handle chosen by the user. The desktop caller serializes operations.
 type Store struct {
-	root     *os.Root
-	revision [sha256.Size]byte
+	root        *os.Root
+	revision    [sha256.Size]byte
+	savedPhoto  bool
+	preferences *Preferences
 }
 
 func Create(path string) (*Store, error) {
@@ -114,10 +126,28 @@ func Open(path string) (*Store, Snapshot, error) {
 		_ = root.Close()
 		return nil, Snapshot{}, ErrInvalid
 	}
-	return &Store{root: root, revision: sha256.Sum256(data)}, snapshot, nil
+	store := &Store{root: root, revision: sha256.Sum256(data)}
+	store.remember(snapshot)
+	return store, snapshot, nil
 }
 
 func (s *Store) Close() { _ = s.root.Close() }
+
+func (s *Store) RemovePhoto() error {
+	if !s.savedPhoto {
+		return ErrNoPhoto
+	}
+	return s.Save(Snapshot{Preferences: s.preferences})
+}
+
+func (s *Store) remember(snapshot Snapshot) {
+	s.savedPhoto = snapshot.Photo != nil
+	s.preferences = nil
+	if snapshot.Preferences != nil {
+		preferences := *snapshot.Preferences
+		s.preferences = &preferences
+	}
+}
 
 func (s *Store) Save(snapshot Snapshot) error {
 	data, err := encode(snapshot)
@@ -137,6 +167,7 @@ func (s *Store) Save(snapshot Snapshot) error {
 		return ErrWrite
 	}
 	s.revision = sha256.Sum256(data)
+	s.remember(snapshot)
 	return nil
 }
 
@@ -206,18 +237,23 @@ func encode(snapshot Snapshot) ([]byte, error) {
 }
 
 func valid(snapshot Snapshot) bool {
-	if snapshot.Draft == nil {
-		return snapshot.Photo == nil
+	if preferences := snapshot.Preferences; preferences != nil {
+		switch preferences.Scene {
+		case "any", "daily", "photo", "party":
+		default:
+			return false
+		}
+		switch preferences.Look {
+		case "any", "natural", "warm", "bold":
+		default:
+			return false
+		}
+	}
+	if snapshot.Photo == nil {
+		return snapshot.Draft == nil
 	}
 	draft := snapshot.Draft
-	switch draft.Scene {
-	case "any", "daily", "photo", "party":
-	default:
-		return false
-	}
-	switch draft.Look {
-	case "any", "natural", "warm", "bold":
-	default:
+	if draft == nil || snapshot.Preferences == nil {
 		return false
 	}
 	if len(draft.Layers) != 3 {
@@ -228,9 +264,6 @@ func valid(snapshot Snapshot) bool {
 		if !exists || !colorPattern.MatchString(layer.Color) || layer.Strength < 0 || layer.Strength > 100 {
 			return false
 		}
-	}
-	if snapshot.Photo == nil {
-		return !draft.Analyzed
 	}
 	p := snapshot.Photo
 	info, err := photo.Inspect("photo."+p.Format, bytes.NewReader(p.Bytes))

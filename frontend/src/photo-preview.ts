@@ -4,18 +4,23 @@ import { mountRecommendations } from "./recommendation-panel";
 import type { Preset, PresetLayer } from "./recommendations";
 
 type PickResult = { url?: string; message?: string };
-type Draft = {
+type Preferences = {
   scene: string;
   look: string;
+};
+type Makeup = {
   analyzed: boolean;
   layers: Record<"lipstick" | "blush" | "eyeshadow", LayerSettings>;
 };
+type Draft = Preferences & Makeup;
 type ProjectResult = {
   active: boolean;
   url?: string;
   message: string;
-  draft?: Draft;
+  draft?: Makeup;
+  preferences?: Preferences;
 };
+type ProjectAction = { done: boolean; message: string };
 type Operation =
   | "Pick"
   | "Clear"
@@ -23,6 +28,7 @@ type Operation =
   | "OpenProject"
   | "SaveProject"
   | "CloseProject"
+  | "RemoveProjectPhoto"
   | "ExportPreview";
 
 async function call<T>(operation: Operation, ...args: unknown[]): Promise<T> {
@@ -123,8 +129,10 @@ export function mountPhotoPreview(section: HTMLElement) {
         <button type="button" id="open-project">打开项目</button>
         <button type="button" id="save-project" disabled>保存项目</button>
         <button type="button" id="close-project" disabled>关闭项目</button>
+        <button type="button" id="remove-project-photo" disabled>移除项目照片</button>
       </div>
       <p>改动需手动保存。关闭项目会丢弃未保存的修改。</p>
+      <p>移除项目照片会清除项目副本和妆容，保留导入原件。</p>
       <p id="project-status" class="status" role="status" aria-label="项目状态"></p>
     </section>
     <div class="photo-actions">
@@ -159,6 +167,9 @@ export function mountPhotoPreview(section: HTMLElement) {
     section.querySelector<HTMLButtonElement>("#save-project")!;
   const closeProject =
     section.querySelector<HTMLButtonElement>("#close-project")!;
+  const removeProjectPhoto = section.querySelector<HTMLButtonElement>(
+    "#remove-project-photo",
+  )!;
   const projectStatus = section.querySelector("#project-status")!;
   const display = section.querySelector<HTMLElement>("#photo-display")!;
   const editor = section.querySelector<HTMLElement>("#makeup-editor")!;
@@ -169,6 +180,7 @@ export function mountPhotoPreview(section: HTMLElement) {
   let original: HTMLImageElement | undefined;
   let render: ReturnType<typeof prepareMakeup> = null;
   let projectActive = false;
+  let hasSavedPhoto = false;
   let restoreAnalysis = false;
   const recommendations = mountRecommendations(
     section.querySelector<HTMLElement>("#recommendations")!,
@@ -184,6 +196,7 @@ export function mountPhotoPreview(section: HTMLElement) {
     createProject.disabled = openProject.disabled = busy || projectActive;
     closeProject.disabled = busy || !projectActive;
     saveProject.disabled = busy || !projectActive || !original;
+    removeProjectPhoto.disabled = busy || !projectActive || !hasSavedPhoto;
   }
 
   function setOriginal(image?: HTMLImageElement) {
@@ -322,8 +335,11 @@ export function mountPhotoPreview(section: HTMLElement) {
     }
   });
 
-  function restoreDraft(draft?: Draft) {
-    recommendations.restore(draft?.scene ?? "any", draft?.look ?? "any");
+  function restoreDraft(draft?: Makeup, preferences?: Preferences) {
+    recommendations.restore(
+      preferences?.scene ?? "any",
+      preferences?.look ?? "any",
+    );
     if (draft) {
       lipstick.restore(draft.layers.lipstick);
       blush.restore(draft.layers.blush);
@@ -343,6 +359,7 @@ export function mountPhotoPreview(section: HTMLElement) {
       projectStatus.textContent = result.message;
       if (!result.active) return;
       projectActive = true;
+      hasSavedPhoto = !!result.url;
       if (operation === "CreateProject") return;
       setOriginal();
       status.textContent = "";
@@ -354,7 +371,7 @@ export function mountPhotoPreview(section: HTMLElement) {
           status.textContent = "无法显示项目照片。";
         }
       }
-      restoreDraft(result.draft);
+      restoreDraft(result.draft, result.preferences);
       if (restoreAnalysis) await analysePhoto();
     } catch {
       projectStatus.textContent = "无法打开本机项目，请重试。";
@@ -377,7 +394,9 @@ export function mountPhotoPreview(section: HTMLElement) {
           eyeshadow: eyeshadow.settings(),
         },
       };
-      projectStatus.textContent = await call<string>("SaveProject", draft);
+      const result = await call<ProjectAction>("SaveProject", draft);
+      projectStatus.textContent = result.message;
+      if (result.done) hasSavedPhoto = true;
     } catch {
       projectStatus.textContent = "无法保存本机项目，请重试。";
     } finally {
@@ -390,12 +409,30 @@ export function mountPhotoPreview(section: HTMLElement) {
     try {
       if (!(await call<boolean>("CloseProject"))) throw new Error();
       projectActive = false;
+      hasSavedPhoto = false;
       setOriginal();
       restoreDraft();
       status.textContent = "";
       projectStatus.textContent = "项目已关闭。";
     } catch {
       projectStatus.textContent = "无法关闭项目，请重试。";
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  removeProjectPhoto.addEventListener("click", async () => {
+    setBusy(true);
+    try {
+      const result = await call<ProjectAction>("RemoveProjectPhoto");
+      projectStatus.textContent = result.message;
+      if (!result.done) return;
+      hasSavedPhoto = false;
+      setOriginal();
+      restoreDraft(undefined, recommendations.preferences());
+      status.textContent = "";
+    } catch {
+      projectStatus.textContent = "无法移除项目照片，请重试。";
     } finally {
       setBusy(false);
     }

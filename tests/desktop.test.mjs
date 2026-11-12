@@ -477,6 +477,106 @@ test(
     ),
 );
 
+test(
+  "移除项目照片只清除保存副本和妆容，保留原件、偏好和其他文件",
+  { timeout: 45_000 },
+  () =>
+    withDesktop(
+      async (page, profile) => {
+        const project = page.getByRole("region", { name: "本机项目" });
+        const remove = project.getByRole("button", { name: "移除项目照片" });
+        await remove.waitFor({ timeout: 5_000 });
+        assert.equal(await remove.isDisabled(), true);
+        const original = join(profile, "portrait.png");
+        const bytes = await readFile(original);
+        const workspace = join(profile, "workspace");
+        const snapshot = join(workspace, "project.json");
+        const other = join(workspace, "notes.txt");
+        await project
+          .getByRole("button", { name: "新建项目" })
+          .click({ timeout: 5_000 });
+        await project
+          .getByText("项目已新建。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        await writeFile(other, "untouched");
+        await page
+          .getByRole("button", { name: "选择本机照片" })
+          .click({ timeout: 5_000 });
+        await page
+          .getByRole("button", { name: "分析面部" })
+          .click({ timeout: 5_000 });
+        await page
+          .getByRole("button", { name: "应用蜜桃暖妆" })
+          .click({ timeout: 5_000 });
+        const scene = page.getByLabel("场景", { exact: true });
+        const look = page.getByLabel("妆感偏好", { exact: true });
+        await scene.selectOption({ label: "拍照" }, { timeout: 5_000 });
+        await look.selectOption({ label: "暖色" }, { timeout: 5_000 });
+        await project
+          .getByRole("button", { name: "保存项目" })
+          .click({ timeout: 5_000 });
+        await project
+          .getByText("项目已保存。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        assert.ok(
+          JSON.parse(await readFile(snapshot, "utf8")).draft.layers.eyeshadow
+            .enabled,
+        );
+
+        await page
+          .getByRole("button", { name: "清除预览" })
+          .click({ timeout: 5_000 });
+        await page
+          .getByText("已清除预览。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        assert.ok(
+          JSON.parse(await readFile(snapshot, "utf8")).photo,
+          "清除预览不应移除保存照片",
+        );
+        await remove.click({ timeout: 5_000 });
+        await project
+          .getByText("项目照片和妆容已移除。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        const remaining = JSON.parse(await readFile(snapshot, "utf8"));
+        assert.equal(remaining.photo, undefined);
+        assert.equal(remaining.draft, undefined);
+        assert.deepEqual(remaining.preferences, {
+          scene: "photo",
+          look: "warm",
+        });
+        assert.deepEqual(await readFile(original), bytes);
+        assert.equal(await readFile(other, "utf8"), "untouched");
+
+        await project
+          .getByRole("button", { name: "关闭项目" })
+          .click({ timeout: 5_000 });
+        await project
+          .getByRole("button", { name: "打开项目" })
+          .click({ timeout: 5_000 });
+        await project
+          .getByText("项目已打开。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        await page
+          .getByRole("img", { name: "本机原图预览" })
+          .waitFor({ state: "hidden", timeout: 5_000 });
+        assert.equal(await scene.inputValue(), "photo");
+        assert.equal(await look.inputValue(), "warm");
+        assert.equal(await remove.isDisabled(), true);
+      },
+      async (profile) => {
+        const workspace = join(profile, "workspace");
+        await mkdir(workspace);
+        return {
+          ...(await makeupFixture(profile, ["portrait"])),
+          MAKEUPMIRROR_SMOKE_PROJECT_DIRS: JSON.stringify([
+            workspace,
+            workspace,
+          ]),
+        };
+      },
+    ),
+);
+
 function countChanges(before, after, regions) {
   const inside = regions.map(() => 0);
   let outside = 0;
@@ -521,7 +621,7 @@ if (realPhoto || realRuntime) {
     { timeout: 60_000 },
     () =>
       withDesktop(
-        async (page) => {
+        async (page, profile) => {
           const region = (process.env.MAKEUPMIRROR_REAL_LIP_BOUNDS ?? "")
             .split(",")
             .map(Number);
@@ -676,11 +776,69 @@ if (realPhoto || realRuntime) {
               `真人预设验收：唇部、双颊和双眼共五处变化 ${combined.inside.join("、")} 个像素，范围外 0。`,
             );
           }
+          if (process.env.MAKEUPMIRROR_REAL_PROJECT === "1") {
+            const workspace = page.getByRole("region", { name: "本机项目" });
+            const click = (name) =>
+              workspace
+                .getByRole("button", { name, exact: true })
+                .click({ timeout: 5_000 });
+            const wait = (message) =>
+              workspace
+                .getByText(message, { exact: true })
+                .waitFor({ timeout: 10_000 });
+            const prior = await pixels(canvas);
+            await click("新建项目");
+            await wait("项目已新建。");
+            await click("保存项目");
+            await wait("项目已保存。");
+            await page
+              .getByRole("button", { name: "导出预览" })
+              .click({ timeout: 5_000 });
+            await page
+              .getByText("预览已导出。", { exact: true })
+              .waitFor({ timeout: 10_000 });
+            const exported = await readFile(join(profile, "real-export.png"));
+            assert.equal(exported.readUInt32BE(16), prior.width);
+            assert.equal(exported.readUInt32BE(20), prior.height);
+            await click("关闭项目");
+            await click("打开项目");
+            await wait("项目已打开。");
+            await canvas.waitFor({ timeout: 10_000 });
+            assert.ok((await pixels(canvas)).bytes.equals(prior.bytes));
+            await click("移除项目照片");
+            await wait("项目照片和妆容已移除。");
+            const remaining = JSON.parse(
+              await readFile(
+                join(profile, "real-workspace", "project.json"),
+                "utf8",
+              ),
+            );
+            assert.equal(remaining.photo, undefined);
+            assert.equal(remaining.draft, undefined);
+            assert.deepEqual(external, []);
+            console.log(
+              `真人项目验收：恢复 ${prior.width} × ${prior.height} 画布一致，导出 ${exported.length} 字节 PNG，项目照片和草稿可移除。`,
+            );
+          }
         },
-        async () => ({
-          MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify([realPhoto]),
-          MAKEUPMIRROR_SMOKE_FACE_DIR: realRuntime,
-        }),
+        async (profile) => {
+          const env = {
+            MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify([realPhoto]),
+            MAKEUPMIRROR_SMOKE_FACE_DIR: realRuntime,
+          };
+          if (process.env.MAKEUPMIRROR_REAL_PROJECT === "1") {
+            const workspace = join(profile, "real-workspace");
+            await mkdir(workspace);
+            env.MAKEUPMIRROR_SMOKE_PROJECT_DIRS = JSON.stringify([
+              workspace,
+              workspace,
+            ]);
+            env.MAKEUPMIRROR_SMOKE_EXPORT_PATHS = JSON.stringify([
+              join(profile, "real-export.png"),
+            ]);
+          }
+          return env;
+        },
       ),
   );
 }

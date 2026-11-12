@@ -33,10 +33,16 @@ type PhotoPreviewService struct {
 }
 
 type projectResult struct {
-	Active  bool           `json:"active"`
-	URL     string         `json:"url,omitempty"`
-	Message string         `json:"message"`
-	Draft   *project.Draft `json:"draft,omitempty"`
+	Active      bool                 `json:"active"`
+	URL         string               `json:"url,omitempty"`
+	Message     string               `json:"message"`
+	Draft       *project.Makeup      `json:"draft,omitempty"`
+	Preferences *project.Preferences `json:"preferences,omitempty"`
+}
+
+type projectAction struct {
+	Done    bool   `json:"done"`
+	Message string `json:"message"`
 }
 
 func nativeProjectPicker(window application.Window) func() (string, error) {
@@ -105,7 +111,7 @@ func (s *PhotoPreviewService) selectProject(create bool) projectResult {
 		return projectResult{Message: err.Error()}
 	}
 	s.workspace = store
-	result := projectResult{Active: true, Draft: saved.Draft, Message: "项目已打开。"}
+	result := projectResult{Active: true, Draft: saved.Draft, Preferences: saved.Preferences, Message: "项目已打开。"}
 	s.setAsset(previewAsset{})
 	if saved.Photo != nil {
 		asset := previewAsset{id: rand.Text(), format: saved.Photo.Format, data: saved.Photo.Bytes}
@@ -115,25 +121,40 @@ func (s *PhotoPreviewService) selectProject(create bool) projectResult {
 	return result
 }
 
-func (s *PhotoPreviewService) SaveProject(draft project.Draft) string {
+func (s *PhotoPreviewService) SaveProject(draft project.Draft) projectAction {
 	if !s.busy.CompareAndSwap(false, true) {
-		return "正在处理，请稍候。"
+		return projectAction{Message: "正在处理，请稍候。"}
 	}
 	defer s.busy.Store(false)
 	if s.workspace == nil {
-		return "请先新建或打开项目。"
+		return projectAction{Message: "请先新建或打开项目。"}
 	}
 	s.mu.RLock()
 	asset := s.current
 	s.mu.RUnlock()
 	if asset.id == "" {
-		return "请选择照片后再保存。"
+		return projectAction{Message: "请选择照片后再保存。"}
 	}
-	snapshot := project.Snapshot{Draft: &draft, Photo: &project.Photo{Format: asset.format, Bytes: asset.data}}
+	snapshot := project.Snapshot{Draft: &draft.Makeup, Preferences: &draft.Preferences, Photo: &project.Photo{Format: asset.format, Bytes: asset.data}}
 	if err := s.workspace.Save(snapshot); err != nil {
-		return err.Error()
+		return projectAction{Message: err.Error()}
 	}
-	return "项目已保存。"
+	return projectAction{Done: true, Message: "项目已保存。"}
+}
+
+func (s *PhotoPreviewService) RemoveProjectPhoto() projectAction {
+	if !s.busy.CompareAndSwap(false, true) {
+		return projectAction{Message: "正在处理，请稍候。"}
+	}
+	defer s.busy.Store(false)
+	if s.workspace == nil {
+		return projectAction{Message: "请先打开项目。"}
+	}
+	if err := s.workspace.RemovePhoto(); err != nil {
+		return projectAction{Message: err.Error()}
+	}
+	s.setAsset(previewAsset{})
+	return projectAction{Done: true, Message: "项目照片和妆容已移除。"}
 }
 
 func (s *PhotoPreviewService) CloseProject() bool {
