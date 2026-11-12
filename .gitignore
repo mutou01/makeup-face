@@ -1,0 +1,45 @@
+# Build output — whatever `make build` and `make clean` name.
+/dist/
+/frontend/dist/
+/build/
+/out/
+*.exe
+*.test
+
+# --- Go ---
+# The compiled binary takes the name of its directory; ignore it in place.
+/makeupmirror
+*.prof
+*.cover
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- TypeScript / Node ---
+node_modules/
+coverage/
+*.tsbuildinfo
+.npm/
+
+# --- Editors and OS ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# --- Local overrides ---
+# Anything machine-specific or secret. Prefer committing an example file
+# (`.env.example`) over documenting the variables in prose, so the list cannot
+# go stale.
+.env
+.env.local
+*.local

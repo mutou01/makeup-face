@@ -1,0 +1,38 @@
+package main
+
+import (
+	"embed"
+	"io/fs"
+	"log"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+)
+
+//go:embed all:frontend/dist
+var frontend embed.FS
+
+func main() {
+	assets, err := fs.Sub(frontend, "frontend/dist")
+	if err != nil {
+		log.Fatal(err)
+	}
+	app := application.New(application.Options{
+		Name:        "MakeupMirror",
+		Description: "本机妆容工作台",
+		Assets: application.AssetOptions{
+			Handler: application.BundledAssetFileServer(assets),
+		},
+		Windows: desktopOptions(),
+	})
+	app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:     "MakeupMirror",
+		URL:       "/",
+		Width:     840,
+		Height:    620,
+		MinWidth:  520,
+		MinHeight: 420,
+	})
+	if err := app.Run(); err != nil {
+		log.Fatal(err)
+	}
+}

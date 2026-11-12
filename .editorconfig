@@ -1,0 +1,30 @@
+# Editor settings that travel with the repository, so a contributor's editor
+# does not reformat the tree on save. The formatter still has the last word —
+# this only stops editors from fighting it.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Go is formatted with tabs; the formatter rewrites anything else.
+[*.go]
+indent_style = tab
+indent_size = 4
+
+[*.{py,pyi}]
+indent_style = space
+indent_size = 4
+
+# Recipes are tabs. A space here is the classic "missing separator" error.
+[Makefile]
+indent_style = tab
+
+[*.md]
+# Two trailing spaces are a line break in Markdown, so stripping them silently
+# changes what the file renders as.
+trim_trailing_whitespace = false

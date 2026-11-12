@@ -1,0 +1,30 @@
+# Every text file checks out with LF, whatever core.autocrlf says.
+#
+# Guard tests that parse source files line by line, and formatters that write
+# LF, both go red on a Windows checkout with autocrlf on — and the failure
+# looks like a broken test rather than a broken checkout. Pin it here so the
+# working tree is the same on every machine.
+#
+# A file that genuinely needs CRLF bytes should say so in its own
+# .gitattributes next to it, rather than loosening this rule for everyone.
+* text=auto eol=lf
+
+# Binary files: never diff, never merge, never touch the bytes.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.icns binary
+*.pdf  binary
+*.woff binary
+*.woff2 binary
+*.zip  binary
+*.gz   binary
+
+# Lock files are generated, but they are also the record of what was installed.
+# Keep them in the diff, out of the language stats.
+package-lock.json  linguist-generated=true
+pnpm-lock.yaml     linguist-generated=true
+yarn.lock          linguist-generated=true
+go.sum             linguist-generated=true

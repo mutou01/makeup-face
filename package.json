@@ -1,0 +1,31 @@
+{
+  "name": "makeupmirror",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "setup": "npm ci && go mod download",
+    "build:frontend": "vite build frontend",
+    "build:app": "node scripts/build-app.mjs",
+    "build:smoke": "node scripts/build-app.mjs smoke",
+    "build": "npm run build:frontend && npm run build:app",
+    "start": "node scripts/start-app.mjs",
+    "lint": "tsc --noEmit && go vet ./...",
+    "format": "gofmt -w . && prettier --write .",
+    "format:check": "node scripts/check-go-format.mjs && prettier --check .",
+    "test": "npm run build:frontend && npm run test:built",
+    "test:built": "go test ./... && npm run build:smoke && npm run test:desktop",
+    "test:desktop": "node --test tests/desktop.test.mjs",
+    "verify": "npm run format:check && npm run build && npm run lint && npm run test:built",
+    "clean": "node scripts/clean.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.65.0",
+    "prettier": "3.10.1",
+    "typescript": "6.0.3",
+    "vite": "8.3.8"
+  }
+}

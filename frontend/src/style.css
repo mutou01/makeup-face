@@ -1,0 +1,50 @@
+:root {
+  color-scheme: light;
+  font:
+    16px / 1.6 system-ui,
+    sans-serif;
+  color: #2d2230;
+  background: #f9f4f5;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 36rem;
+  margin: auto;
+  padding: clamp(1.5rem, 5vw, 4rem);
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2rem, 7vw, 3.5rem);
+  line-height: 1.15;
+}
+
+h2 {
+  margin-top: 0;
+  font-size: 1.25rem;
+}
+
+.label,
+.status {
+  color: #654860;
+}
+
+section {
+  margin-top: 2rem;
+  border: 1px solid #e4d7e0;
+  border-radius: 1rem;
+  background: white;
+  padding: 1.5rem;
+}
+
+ol {
+  padding-left: 1.5rem;
+}
+
+.status {
+  margin-bottom: 0;
+}
