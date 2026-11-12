@@ -1,6 +1,15 @@
 export type Point = { x: number; y: number };
+export type FacePose = {
+  rows: number;
+  columns: number;
+  data: ArrayLike<number>;
+};
+type DetectedFace = { points: Point[]; pose?: FacePose };
 type Landmarker = {
-  detect: (frame: HTMLCanvasElement) => { faceLandmarks: Point[][] };
+  detect: (frame: HTMLCanvasElement) => {
+    faceLandmarks: Point[][];
+    facialTransformationMatrixes: FacePose[];
+  };
   close: () => void;
 };
 type FaceRuntime = {
@@ -12,6 +21,7 @@ type FaceRuntime = {
         baseOptions: { modelAssetBuffer: Uint8Array; delegate: "CPU" };
         runningMode: "IMAGE";
         numFaces: number;
+        outputFacialTransformationMatrixes: true;
       },
     ) => Promise<Landmarker>;
   };
@@ -22,7 +32,7 @@ const modelAssetPath = `${base}/face_landmarker.task`;
 
 export async function detectFaces(
   frame: HTMLCanvasElement,
-): Promise<Point[][] | null> {
+): Promise<DetectedFace[] | null> {
   const model = await fetch(modelAssetPath);
   if (!model.ok) return null;
   const modelAssetBuffer = new Uint8Array(await model.arrayBuffer());
@@ -33,9 +43,14 @@ export async function detectFaces(
     baseOptions: { modelAssetBuffer, delegate: "CPU" },
     runningMode: "IMAGE",
     numFaces: 2,
+    outputFacialTransformationMatrixes: true,
   });
   try {
-    return landmarker.detect(frame).faceLandmarks;
+    const result = landmarker.detect(frame);
+    return result.faceLandmarks.map((points, i) => ({
+      points,
+      pose: result.facialTransformationMatrixes?.[i],
+    }));
   } finally {
     landmarker.close();
   }

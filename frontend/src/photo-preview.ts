@@ -1,4 +1,5 @@
 import { detectFaces, prepareFaceFrame } from "./face-analysis";
+import { checkFraming, checkImageQuality } from "./face-quality";
 import { prepareMakeup, type LayerSettings } from "./makeup-preview";
 import { mountRecommendations } from "./recommendation-panel";
 import type { Preset, PresetLayer } from "./recommendations";
@@ -247,7 +248,18 @@ export function mountPhotoPreview(section: HTMLElement) {
       } else if (faces.length > 1) {
         status.textContent = "检测到多张人脸，请换一张单人正面照。";
       } else {
-        render = prepareMakeup(canvas, frame, faces[0]);
+        const { points, pose } = faces[0];
+        const framing = checkFraming(frame.width, frame.height, points, pose);
+        if (!framing.ok) {
+          status.textContent = framing.message;
+          return;
+        }
+        const imageQuality = checkImageQuality(frame, framing.bounds);
+        if (imageQuality) {
+          status.textContent = imageQuality;
+          return;
+        }
+        render = prepareMakeup(canvas, frame, points);
         if (!render) {
           status.textContent = "唇部轮廓不完整，请换一张清晰的正面照。";
           return;
