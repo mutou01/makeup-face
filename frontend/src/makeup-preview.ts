@@ -1,4 +1,5 @@
 import { blushMask } from "./blush";
+import { eyeshadowMask } from "./eyeshadow";
 import type { Point } from "./face-analysis";
 import { lipstickMask } from "./lipstick";
 
@@ -7,7 +8,8 @@ export type LayerSettings = {
   color: string;
   strength: number;
 };
-type Settings = { lipstick: LayerSettings; blush: LayerSettings };
+const kinds = ["lipstick", "blush", "eyeshadow"] as const;
+type Settings = Record<(typeof kinds)[number], LayerSettings>;
 
 function compile(mask: Uint8ClampedArray, maxOpacity: number) {
   const pixels: number[] = [];
@@ -24,9 +26,11 @@ export function prepareMakeup(
   const lips = lipstickMask(width, height, points);
   if (!lips) return null;
   const cheeks = blushMask(width, height, points, lips);
+  const lids = eyeshadowMask(width, height, points, lips, cheeks);
   const layers = {
     lipstick: compile(lips, 0.85),
     blush: cheeks ? compile(cheeks, 0.45) : null,
+    eyeshadow: lids ? compile(lids, 0.52) : null,
   };
   canvas.width = width;
   canvas.height = height;
@@ -38,9 +42,10 @@ export function prepareMakeup(
 
   return {
     hasBlush: cheeks !== null,
+    hasEyeshadow: lids !== null,
     paint(settings: Settings) {
       output.data.set(original.data);
-      for (const kind of ["lipstick", "blush"] as const) {
+      for (const kind of kinds) {
         const layer = layers[kind];
         const { enabled, color, strength } = settings[kind];
         if (!layer || !enabled || strength === 0) continue;

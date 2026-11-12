@@ -80,6 +80,7 @@ export function mountPhotoPreview(section: HTMLElement) {
       <div class="makeup-layers">
         ${layerMarkup("lipstick", "口红", "#ae344d", 65)}
         ${layerMarkup("blush", "腮红", "#d66c83", 55)}
+        ${layerMarkup("eyeshadow", "眼影", "#835d79", 50)}
       </div>
     </div>
   `;
@@ -92,6 +93,7 @@ export function mountPhotoPreview(section: HTMLElement) {
   const canvas = editor.querySelector("canvas")!;
   const lipstick = layerControls(editor, "lipstick", updatePreview);
   const blush = layerControls(editor, "blush", updatePreview);
+  const eyeshadow = layerControls(editor, "eyeshadow", updatePreview);
   let original: HTMLImageElement | undefined;
   let render: ReturnType<typeof prepareMakeup> = null;
 
@@ -108,12 +110,17 @@ export function mountPhotoPreview(section: HTMLElement) {
     canvas.width = canvas.height = 0;
     lipstick.reset();
     blush.reset();
+    eyeshadow.reset();
     display.hidden = false;
     display.replaceChildren(...(image ? [image] : []));
   }
 
   function updatePreview() {
-    render?.paint({ lipstick: lipstick.settings(), blush: blush.settings() });
+    render?.paint({
+      lipstick: lipstick.settings(),
+      blush: blush.settings(),
+      eyeshadow: eyeshadow.settings(),
+    });
   }
 
   analyse.addEventListener("click", async () => {
@@ -136,12 +143,17 @@ export function mountPhotoPreview(section: HTMLElement) {
           return;
         }
         blush.fieldset.hidden = !render.hasBlush;
+        eyeshadow.fieldset.hidden = !render.hasEyeshadow;
         updatePreview();
         display.hidden = true;
         editor.hidden = false;
-        status.textContent = render.hasBlush
-          ? "唇部和双颊已定位，可以启用口红或腮红。"
-          : "唇部已定位，双颊轮廓不完整，仍可启用口红。";
+        const ready = ["口红"];
+        if (render.hasBlush) ready.push("腮红");
+        if (render.hasEyeshadow) ready.push("眼影");
+        status.textContent =
+          ready.length === 3
+            ? `已定位，可启用${ready.join("、")}。`
+            : `部分区域定位不完整，可启用${ready.join("、")}。`;
       }
     } catch {
       status.textContent = "本机人脸分析未能完成，可继续查看原图。";
