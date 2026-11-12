@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { crc32, deflateSync } from "node:zlib";
 import { chromium } from "playwright-core";
 
 const executable = fileURLToPath(
@@ -577,6 +578,83 @@ test(
     ),
 );
 
+test(
+  "人脸太小、贴边或姿态不合适时保留原图并阻止试妆",
+  { timeout: 45_000 },
+  () =>
+    withDesktop(
+      async (page) => {
+        const pick = page.getByRole("button", { name: "选择本机照片" });
+        const analyse = page.getByRole("button", { name: "分析面部" });
+        const original = page.getByRole("img", { name: "本机原图预览" });
+        const preview = page.getByRole("img", { name: "试妆预览" });
+        const apply = page.getByRole("button", { name: "应用日常豆沙" });
+        for (const message of [
+          "人脸太小",
+          "人脸靠近照片边缘",
+          "头部侧转过大",
+          "头部俯仰过大",
+          "无法判断头部姿态",
+        ]) {
+          await pick.click({ timeout: 5_000 });
+          await analyse.click({ timeout: 5_000 });
+          await page
+            .getByRole("status", { name: "照片处理状态" })
+            .filter({ hasText: message })
+            .waitFor({ timeout: 5_000 });
+          await original.waitFor({ timeout: 5_000 });
+          await preview.waitFor({ state: "hidden", timeout: 5_000 });
+          assert.equal(await apply.isDisabled(), true);
+        }
+        await pick.click({ timeout: 5_000 });
+        await analyse.click({ timeout: 5_000 });
+        await preview.waitFor({ timeout: 5_000 });
+        assert.equal(await apply.isEnabled(), true);
+      },
+      (profile) =>
+        makeupFixture(profile, [
+          "too-small",
+          "edge",
+          "yaw",
+          "pitch",
+          "no-pose",
+          "portrait",
+        ]),
+    ),
+);
+
+function fixturePNG(width, height, rgbAt, extraChunks = []) {
+  function chunk(name, bytes) {
+    const out = Buffer.alloc(12 + bytes.length);
+    out.writeUInt32BE(bytes.length);
+    out.write(name, 4, "ascii");
+    bytes.copy(out, 8);
+    out.writeUInt32BE(
+      crc32(out.subarray(4, 8 + bytes.length)),
+      8 + bytes.length,
+    );
+    return out;
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 2;
+  const stride = width * 3 + 1;
+  const rows = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++)
+      rows.set(rgbAt(x, y), y * stride + 1 + x * 3);
+  }
+  return Buffer.concat([
+    Buffer.from("89504e470d0a1a0a", "hex"),
+    chunk("IHDR", header),
+    ...extraChunks.map(([name, bytes]) => chunk(name, bytes)),
+    chunk("IDAT", deflateSync(rows)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
 function countChanges(before, after, regions) {
   const inside = regions.map(() => 0);
   let outside = 0;
@@ -1071,6 +1149,20 @@ async function makeupFixture(
         "base64",
       ),
     );
+  const framing = {
+    "too-small": 241,
+    edge: 242,
+    yaw: 243,
+    pitch: 244,
+    "no-pose": 245,
+  };
+  for (const [name, width] of Object.entries(framing)) {
+    if (order.includes(name))
+      await writeFile(
+        join(profile, `${name}.png`),
+        fixturePNG(width, 240, () => [167, 95, 100]),
+      );
+  }
   await writeFile(join(profile, "face_landmarker.task"), "test boundary only");
   // This module replaces only the external model; the photo, UI and renderer are real.
   await writeFile(
@@ -1100,13 +1192,22 @@ async function makeupFixture(
               brow.forEach((id, i) => { face[id] = { x: (start + direction * 8 * i) / 240, y: 81 / 240 }; });
             }
             if (image.height === 239) delete face[46]; // Only the eye layer is unavailable.
-            return {faceLandmarks: image.width === 240 ? [face] : image.width === 2 ? [] : [face, face]};
+            face[10] = { x: .5, y: .18 }; face[152] = { x: .5, y: .81 };
+            if (image.width === 241) for (const point of face) if (point) { point.x = .5 + (point.x - .5) * .4; point.y = .5 + (point.y - .5) * .4; }
+            if (image.width === 242) face[234].x = .009;
+            const yaw = image.width === 243 ? Math.PI / 4 : 0;
+            const pitch = image.width === 244 ? Math.PI / 5 : 0;
+            const c = Math.cos(yaw), s = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+            const matrix = { rows: 4, columns: 4, data: [c,0,-s,0, s*sp,cp,c*sp,0, s*cp,-sp,c*cp,0, 0,0,0,1] };
+            return { faceLandmarks: image.width >= 240 ? [face] : image.width === 2 ? [] : [face, face], facialTransformationMatrixes: image.width === 245 ? [] : [matrix] };
           },
           close() {},
         }) };
       `,
   );
   const files = { portrait, "no-face": noFace, multiple, partial };
+  for (const name of Object.keys(framing))
+    files[name] = join(profile, `${name}.png`);
   return {
     MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify(
       order.map((name) => files[name]),
