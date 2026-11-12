@@ -36,6 +36,12 @@ type Info struct {
 // Inspect validates the encoded contents without keeping pixels or opening files.
 // The name supplies only a declared extension. Width and height are as encoded.
 func Inspect(filename string, input io.Reader) (Info, error) {
+	info, _, err := Read(filename, input)
+	return info, err
+}
+
+// Read validates one bounded snapshot, returning its original bytes only on success.
+func Read(filename string, input io.Reader) (Info, []byte, error) {
 	ext := strings.ToLower(filepath.Ext(filename))
 	var declared string
 	switch ext {
@@ -44,15 +50,23 @@ func Inspect(filename string, input io.Reader) (Info, error) {
 	case ".png", ".webp":
 		declared = ext[1:]
 	default:
-		return Info{}, ErrFormat
+		return Info{}, nil, ErrFormat
 	}
 	data, err := io.ReadAll(io.LimitReader(input, maxBytes+1))
 	if err != nil {
-		return Info{}, ErrRead
+		return Info{}, nil, ErrRead
 	}
 	if len(data) > maxBytes {
-		return Info{}, ErrSize
+		return Info{}, nil, ErrSize
 	}
+	info, err := inspectEncoded(declared, data)
+	if err != nil {
+		return Info{}, nil, err
+	}
+	return info, data, nil
+}
+
+func inspectEncoded(declared string, data []byte) (Info, error) {
 	format := sniffFormat(data)
 	if format == "" {
 		return Info{}, ErrCorrupt
