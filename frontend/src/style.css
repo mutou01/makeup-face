@@ -100,7 +100,8 @@ ol {
   gap: 0.5rem;
 }
 
-.photo-actions button {
+.photo-actions button,
+.preset-card button {
   border: 1px solid #d5c1d0;
   border-radius: 0.5rem;
   padding: 0.4rem 0.75rem;
@@ -109,7 +110,8 @@ ol {
   background: #f9f4f5;
 }
 
-.photo-actions button:disabled {
+.photo-actions button:disabled,
+.preset-card button:disabled {
   opacity: 0.65;
 }
 
@@ -154,6 +156,10 @@ ol {
 .preset-card h3,
 .preset-card p {
   margin: 0 0 0.3rem;
+}
+
+.preset-card button {
+  margin-top: 0.45rem;
 }
 
 .preset-palette {

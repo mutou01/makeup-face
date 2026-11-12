@@ -1,6 +1,7 @@
 import { detectFaces, prepareFaceFrame } from "./face-analysis";
 import { prepareMakeup } from "./makeup-preview";
 import { mountRecommendations } from "./recommendation-panel";
+import type { Preset, PresetLayer } from "./recommendations";
 
 type PickResult = { url?: string; message?: string };
 
@@ -57,6 +58,12 @@ function layerControls(editor: HTMLElement, id: string, onInput: () => void) {
     reset: () => {
       enabled.checked = false;
     },
+    apply: (preset: PresetLayer) => {
+      enabled.checked = true;
+      color.value = preset.color;
+      strength.valueAsNumber = preset.strength;
+      output.value = `${strength.value}%`;
+    },
     settings: () => ({
       enabled: enabled.checked,
       color: color.value,
@@ -74,7 +81,7 @@ export function mountPhotoPreview(section: HTMLElement) {
       <button type="button" id="analyse-face" disabled>分析面部</button>
       <button type="button" id="clear-photo" disabled>清除预览</button>
     </div>
-    <p id="photo-status" class="status" role="status"></p>
+    <p id="photo-status" class="status" role="status" aria-label="照片处理状态"></p>
     <div id="photo-display"></div>
     <div id="makeup-editor" hidden>
       <canvas role="img" aria-label="试妆预览" class="photo-preview-image"></canvas>
@@ -86,7 +93,6 @@ export function mountPhotoPreview(section: HTMLElement) {
     </div>
     <section id="recommendations" class="recommendation-panel" aria-labelledby="recommendation-title"></section>
   `;
-  mountRecommendations(section.querySelector<HTMLElement>("#recommendations")!);
   const pick = section.querySelector<HTMLButtonElement>("#pick-photo")!;
   const clear = section.querySelector<HTMLButtonElement>("#clear-photo")!;
   const analyse = section.querySelector<HTMLButtonElement>("#analyse-face")!;
@@ -99,11 +105,16 @@ export function mountPhotoPreview(section: HTMLElement) {
   const eyeshadow = layerControls(editor, "eyeshadow", updatePreview);
   let original: HTMLImageElement | undefined;
   let render: ReturnType<typeof prepareMakeup> = null;
+  const recommendations = mountRecommendations(
+    section.querySelector<HTMLElement>("#recommendations")!,
+    applyPreset,
+  );
 
   function setBusy(busy: boolean) {
     pick.disabled = busy;
     clear.disabled = busy || !original;
     analyse.disabled = busy || !original || !!render;
+    recommendations.setAvailable(!busy && render !== null);
   }
 
   function setOriginal(image?: HTMLImageElement) {
@@ -114,6 +125,7 @@ export function mountPhotoPreview(section: HTMLElement) {
     lipstick.reset();
     blush.reset();
     eyeshadow.reset();
+    recommendations.resetFeedback();
     display.hidden = false;
     display.replaceChildren(...(image ? [image] : []));
   }
@@ -124,6 +136,19 @@ export function mountPhotoPreview(section: HTMLElement) {
       blush: blush.settings(),
       eyeshadow: eyeshadow.settings(),
     });
+  }
+
+  function applyPreset(preset: Preset) {
+    if (!render) return null;
+    const missing: string[] = [];
+    lipstick.apply(preset.layers.lipstick);
+    if (render.hasBlush) blush.apply(preset.layers.blush);
+    else missing.push("腮红");
+    if (render.hasEyeshadow) eyeshadow.apply(preset.layers.eyeshadow);
+    else missing.push("眼影");
+    updatePreview();
+    canvas.scrollIntoView({ block: "nearest" });
+    return missing;
   }
 
   analyse.addEventListener("click", async () => {

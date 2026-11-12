@@ -1,4 +1,4 @@
-import { looks, recommend, scenes } from "./recommendations";
+import { looks, recommend, scenes, type Preset } from "./recommendations";
 
 const layers = [
   ["lipstick", "口红"],
@@ -12,17 +12,24 @@ function options(values: Readonly<Record<string, string>>) {
     .join("");
 }
 
-export function mountRecommendations(panel: HTMLElement) {
+export function mountRecommendations(
+  panel: HTMLElement,
+  apply: (preset: Preset) => string[] | null,
+) {
   panel.innerHTML = `
     <h2 id="recommendation-title">妆容推荐</h2>
     <div class="recommendation-filters">
       <div><label for="recommendation-scene">场景</label> <select id="recommendation-scene">${options(scenes)}</select></div>
       <div><label for="recommendation-look">妆感偏好</label> <select id="recommendation-look">${options(looks)}</select></div>
     </div>
+    <p class="status">分析面部后，可将预设应用到当前照片。</p>
     <ol class="preset-list" aria-label="推荐方案"></ol>
+    <p class="status" role="status" aria-label="预设应用结果"></p>
   `;
   const [scene, look] = panel.querySelectorAll("select");
   const list = panel.querySelector("ol")!;
+  const feedback = panel.querySelector('[role="status"]')!;
+  let available = false;
 
   function render() {
     list.replaceChildren(
@@ -46,7 +53,19 @@ export function mountRecommendations(panel: HTMLElement) {
           item.append(swatch, `${label} ${color} · ${strength}%`);
           palette.append(item);
         }
-        card.append(title, details, palette);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = `应用${preset.name}`;
+        button.disabled = !available;
+        button.addEventListener("click", () => {
+          if (!available) return;
+          const missing = apply(preset);
+          if (missing === null) return;
+          feedback.textContent = missing.length
+            ? `已应用「${preset.name}」的可用图层。未定位：${missing.join("、")}。`
+            : `已应用「${preset.name}」，可继续微调。`;
+        });
+        card.append(title, details, palette, button);
         return card;
       }),
     );
@@ -55,4 +74,14 @@ export function mountRecommendations(panel: HTMLElement) {
   scene.addEventListener("change", render);
   look.addEventListener("change", render);
   render();
+  return {
+    setAvailable(value: boolean) {
+      available = value;
+      for (const button of list.querySelectorAll("button"))
+        button.disabled = !value;
+    },
+    resetFeedback() {
+      feedback.textContent = "";
+    },
+  };
 }
