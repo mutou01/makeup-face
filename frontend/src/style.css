@@ -176,3 +176,20 @@ ol {
   margin-right: 0.25em;
   border-radius: 50%;
 }
+
+.provider-fields {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid #e4d7e0;
+  border-radius: 0.75rem;
+}
+
+.provider-fields input[type="text"],
+.provider-fields input[type="password"] {
+  min-width: 0;
+  padding: 0.3rem 0.5rem;
+  font: inherit;
+  color: inherit;
+}

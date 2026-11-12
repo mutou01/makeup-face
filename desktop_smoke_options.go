@@ -11,7 +11,23 @@ import (
 	"strconv"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"makeupmirror/internal/provider"
 )
+
+type memoryVault map[string][]byte
+
+func (v memoryVault) Read(target string) ([]byte, error) {
+	return append([]byte(nil), v[target]...), nil
+}
+func (v memoryVault) Write(target string, key []byte) error {
+	v[target] = append([]byte(nil), key...)
+	return nil
+}
+func (v memoryVault) Delete(target string) error { clear(v[target]); delete(v, target); return nil }
+
+func desktopProviderStore() *provider.Store {
+	return provider.NewStore(os.Getenv("MAKEUPMIRROR_SMOKE_PROFILE"), memoryVault{})
+}
 
 func desktopFaceRuntime() (string, bool) {
 	root := os.Getenv("MAKEUPMIRROR_SMOKE_FACE_DIR")

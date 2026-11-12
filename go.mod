@@ -3,6 +3,7 @@ module makeupmirror
 go 1.26.11
 
 require (
+	github.com/danieljoos/wincred v1.2.3
 	github.com/wailsapp/wails/v3 v3.1.0
 	golang.org/x/image v0.48.0
 )

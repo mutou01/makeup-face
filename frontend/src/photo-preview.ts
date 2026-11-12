@@ -2,6 +2,7 @@ import { detectFaces, prepareFaceFrame } from "./face-analysis";
 import { checkFraming, checkImageQuality } from "./face-quality";
 import { prepareMakeup, type LayerSettings } from "./makeup-preview";
 import { mountRecommendations } from "./recommendation-panel";
+import { mountProviderSettings } from "./provider-settings";
 import type { Preset, PresetLayer } from "./recommendations";
 
 type PickResult = { url?: string; message?: string };
@@ -153,7 +154,11 @@ export function mountPhotoPreview(section: HTMLElement) {
       </div>
     </div>
     <section id="recommendations" class="recommendation-panel" aria-labelledby="recommendation-title"></section>
+    <section id="provider-settings" class="recommendation-panel" aria-labelledby="provider-title"></section>
   `;
+  mountProviderSettings(
+    section.querySelector<HTMLElement>("#provider-settings")!,
+  );
   const pick = section.querySelector<HTMLButtonElement>("#pick-photo")!;
   const clear = section.querySelector<HTMLButtonElement>("#clear-photo")!;
   const exportPreview =
