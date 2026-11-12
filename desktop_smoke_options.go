@@ -22,13 +22,21 @@ func desktopFaceRuntime() (string, bool) {
 }
 
 func desktopPhotoPicker(window application.Window) func() (string, error) {
-	raw := os.Getenv("MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS")
+	return smokePicker("MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS", nativePhotoPicker(window))
+}
+
+func desktopProjectPicker(window application.Window) func() (string, error) {
+	return smokePicker("MAKEUPMIRROR_SMOKE_PROJECT_DIRS", nativeProjectPicker(window))
+}
+
+func smokePicker(key string, fallback func() (string, error)) func() (string, error) {
+	raw := os.Getenv(key)
 	if raw == "" {
-		return nativePhotoPicker(window)
+		return fallback
 	}
 	var selections []string
 	if err := json.Unmarshal([]byte(raw), &selections); err != nil {
-		log.Fatal("桌面验收照片列表无效")
+		log.Fatal("桌面验收选择列表无效")
 	}
 	return func() (string, error) {
 		if len(selections) == 0 {

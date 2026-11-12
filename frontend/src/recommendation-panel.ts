@@ -75,6 +75,12 @@ export function mountRecommendations(
   look.addEventListener("change", render);
   render();
   return {
+    preferences: () => ({ scene: scene.value, look: look.value }),
+    restore(sceneValue: string, lookValue: string) {
+      scene.value = sceneValue;
+      look.value = lookValue;
+      render();
+    },
     setAvailable(value: boolean) {
       available = value;
       for (const button of list.querySelectorAll("button"))

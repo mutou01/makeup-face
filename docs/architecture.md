@@ -20,7 +20,7 @@ flowchart LR
 
 采用 Go 1.26 + Wails v3.1.0 + WebView2，前端以 TypeScript + Vite 起步。Go 负责原生文件选择、项目操作和 AI 请求；Wails 只绑定明确的业务操作；WebView2 只加载嵌入的界面和运行资源。Go 校验项目和入参，WebView2 限制导航、弹窗和外部资源，发布版不启用调试端口、不开放本机监听服务。模型与 WASM 优先走 Wails 内嵌资源服务，先验收 MIME、解码、Worker 和 WebGL。开发安装依赖可联网；发布应用不下载脚本、模型或字体。
 
-候选项目格式为 `project.json`（格式版本、项目 ID 和草稿引用）、`photos/`（应用导入的照片）、`drafts/`（妆容草稿和偏好）。API 密钥保存在 Windows 凭据区。界面仅持有 Go 提供的资源 ID，不传可写路径；项目根由原生选择器授予。读写核对规范化路径，拒绝指向根外的符号链接、联接点及上级目录引用。元数据在同目录写临时文件再替换；同一项目只允许一个写入会话，预留崩溃恢复。删除只清理应用拥有的条目，不递归删除用户选择的根。关闭项目后重置界面与内存。用户应选择本机非同步目录；项目隔离依赖 Windows 账户和文件权限，不代表每个项目有独立系统账户或照片加密。
+[本机项目](subsystems/project-workspace.md) v1 使用 `project.json` 单快照，保存一张照片副本、妆容与偏好。Go 只在用户选定的目录中读写固定的项目文件；界面仅持有 Go 提供的照片资源 ID，不传可写路径。关闭项目后重置界面和内存。用户应选择本机非同步目录；项目隔离依赖 Windows 账户和文件权限，文件没有加密。未来供应商的 API 密钥仍与项目文件分开。
 
 建议的公开操作按工作流命名：`createProject`、`openProject`、`importPhoto`、`saveDraft`、`deletePhoto`、`exportPreview` 和 `explainPreset`。初始化先验收应用窗口，暂不实现这些接口。业务迭代时再按纵向切片逐个确认接口和失败用例；不要暴露通用的文件系统、网络或任意命令调用。
 
@@ -37,7 +37,7 @@ flowchart LR
 
 妆容图层最小契约：`{ id, kind, colorSrgb, opacity, coverage, blend }`。`kind` 为口红、眼影或腮红，`opacity` 限 `[0, 1]`，`coverage` 的可调范围由各区域安全蒙版限制。MVP 将颜色定义为 `#RRGGBB` sRGB；统一 EXIF 方向和预览坐标，明确工作分辨率。若以后引入 UV 图层，复用妆容意图和编辑交互，在 3D 后端定义自己的材质表达；不要求 2D 蒙版直接兼容。
 
-照片输入的格式、容量、尺寸、静态解码和原图预览契约见[本机照片校验](subsystems/photo-input.md)。选图和原图预览不依赖模型；用户主动分析面部时才加载经过校验的本机模型。[口红](subsystems/lipstick-preview.md)、[腮红](subsystems/blush-preview.md)和[眼影](subsystems/eyeshadow-preview.md)共用同一次分析，在工作原图上独立合成，试妆不保存项目数据。
+照片输入的格式、容量、尺寸、静态解码和原图预览契约见[本机照片校验](subsystems/photo-input.md)。选图和原图预览不依赖模型；用户分析面部或重开已分析的照片时才加载经过校验的本机模型。[口红](subsystems/lipstick-preview.md)、[腮红](subsystems/blush-preview.md)和[眼影](subsystems/eyeshadow-preview.md)共用同一次分析，在工作原图上独立合成，试妆过程不自动保存。
 
 [本地推荐](subsystems/recommendations.md)按用户选的场景与妆感排序。它不读取图像或关键点；用户点击应用后，工作台只更新已定位的图层。
 

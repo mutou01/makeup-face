@@ -11,21 +11,118 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"makeupmirror/internal/photo"
+	"makeupmirror/internal/project"
 )
 
 const photoPreviewPrefix = "/local-photo-preview/"
 
 type previewAsset struct {
-	id, mime string
-	data     []byte
+	id, format string
+	data       []byte
 }
 
-// PhotoPreviewService only exposes user-initiated selection and clearing to the window.
+// PhotoPreviewService serializes user-initiated photo and project actions.
 type PhotoPreviewService struct {
-	pick    func() (string, error)
-	busy    atomic.Bool
-	mu      sync.RWMutex
-	current previewAsset
+	pick        func() (string, error)
+	pickProject func() (string, error)
+	workspace   *project.Store
+	busy        atomic.Bool
+	mu          sync.RWMutex
+	current     previewAsset
+}
+
+type projectResult struct {
+	Active  bool           `json:"active"`
+	URL     string         `json:"url,omitempty"`
+	Message string         `json:"message"`
+	Draft   *project.Draft `json:"draft,omitempty"`
+}
+
+func nativeProjectPicker(window application.Window) func() (string, error) {
+	return func() (string, error) {
+		return application.Get().Dialog.OpenFile().AttachToWindow(window).
+			CanChooseFiles(false).CanChooseDirectories(true).
+			SetTitle("选择本机项目目录").PromptForSingleSelection()
+	}
+}
+
+func (s *PhotoPreviewService) CreateProject() projectResult { return s.selectProject(true) }
+func (s *PhotoPreviewService) OpenProject() projectResult   { return s.selectProject(false) }
+
+func (s *PhotoPreviewService) selectProject(create bool) projectResult {
+	if !s.busy.CompareAndSwap(false, true) {
+		return projectResult{Message: "正在处理，请稍候。"}
+	}
+	defer s.busy.Store(false)
+	if s.workspace != nil {
+		return projectResult{Message: "请先关闭当前项目。"}
+	}
+	path, err := s.pickProject()
+	if err != nil || path == "" {
+		return projectResult{Message: "未选择项目目录。"}
+	}
+	if create {
+		store, err := project.Create(path)
+		if err != nil {
+			return projectResult{Message: err.Error()}
+		}
+		s.workspace = store
+		return projectResult{Active: true, Message: "项目已新建。"}
+	}
+	store, saved, err := project.Open(path)
+	if err != nil {
+		return projectResult{Message: err.Error()}
+	}
+	s.workspace = store
+	result := projectResult{Active: true, Draft: saved.Draft, Message: "项目已打开。"}
+	s.setAsset(previewAsset{})
+	if saved.Photo != nil {
+		asset := previewAsset{id: rand.Text(), format: saved.Photo.Format, data: saved.Photo.Bytes}
+		s.setAsset(asset)
+		result.URL = photoPreviewPrefix + asset.id
+	}
+	return result
+}
+
+func (s *PhotoPreviewService) SaveProject(draft project.Draft) string {
+	if !s.busy.CompareAndSwap(false, true) {
+		return "正在处理，请稍候。"
+	}
+	defer s.busy.Store(false)
+	if s.workspace == nil {
+		return "请先新建或打开项目。"
+	}
+	s.mu.RLock()
+	asset := s.current
+	s.mu.RUnlock()
+	if asset.id == "" {
+		return "请选择照片后再保存。"
+	}
+	snapshot := project.Snapshot{Draft: &draft, Photo: &project.Photo{Format: asset.format, Bytes: asset.data}}
+	if err := s.workspace.Save(snapshot); err != nil {
+		return err.Error()
+	}
+	return "项目已保存。"
+}
+
+func (s *PhotoPreviewService) CloseProject() bool {
+	if !s.busy.CompareAndSwap(false, true) {
+		return false
+	}
+	defer s.busy.Store(false)
+	if s.workspace == nil {
+		return false
+	}
+	s.workspace.Close()
+	s.workspace = nil
+	s.setAsset(previewAsset{})
+	return true
+}
+
+func (s *PhotoPreviewService) setAsset(asset previewAsset) {
+	s.mu.Lock()
+	s.current = asset
+	s.mu.Unlock()
 }
 
 type pickResult struct {
@@ -71,10 +168,8 @@ func (s *PhotoPreviewService) Pick() pickResult {
 	if err != nil {
 		return pickResult{Message: err.Error()}
 	}
-	asset := previewAsset{id: rand.Text(), mime: "image/" + info.Format, data: data}
-	s.mu.Lock()
-	s.current = asset
-	s.mu.Unlock()
+	asset := previewAsset{id: rand.Text(), format: info.Format, data: data}
+	s.setAsset(asset)
 	return pickResult{URL: photoPreviewPrefix + asset.id}
 }
 
@@ -83,9 +178,7 @@ func (s *PhotoPreviewService) Clear() bool {
 		return false
 	}
 	defer s.busy.Store(false)
-	s.mu.Lock()
-	s.current = previewAsset{}
-	s.mu.Unlock()
+	s.setAsset(previewAsset{})
 	return true
 }
 
@@ -109,7 +202,7 @@ func (s *PhotoPreviewService) assets(next http.Handler) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", asset.mime)
+		w.Header().Set("Content-Type", "image/"+asset.format)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(http.StatusOK)
 		if r.Method == http.MethodGet {

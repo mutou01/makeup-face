@@ -5,6 +5,7 @@
 - [双颊腮红](blush-preview.md)：脸颊定位和图层独立性。
 - [上眼睑眼影](eyeshadow-preview.md)：双眼定位、眼睑和眉毛保护边界。
 - [妆容推荐](recommendations.md)：本地预设、排序和试妆入口。
+- [本机项目](project-workspace.md)：单照片项目、保存与恢复。
 - [日志与供应商](foundation.md)：MVP 设计，尚未实现。
 
 These pages describe what each part of the project is responsible for, how it
