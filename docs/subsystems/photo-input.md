@@ -1,0 +1,7 @@
+# 本机照片校验
+
+[校验入口](../../internal/photo/validate.go)接收文件名和一个本机字节流，不打开路径、不写文件、不访问网络。文件名只用于识别扩展名；JPEG、PNG、WebP 均检查扩展名与实际格式是否一致。读取最多 15 MiB 加 1 字节，超过 15 MiB 立即拒绝。静态容器结构和尺寸通过检查后，才完整解码以排除损坏像素。像素总数上限为 2400 万。
+
+成功只返回实际格式和编码宽高，不保留像素或元数据。PNG 与 WebP 的动画容器会拒绝；过大、类型不符、损坏和读失败分别返回可区分的错误，不携带原文件名或路径。方向归一化、桌面选图、脸数、姿态、遮挡和妆容渲染在后续切片实现。
+
+依赖为 Go 标准库和固定版本的 [Go WebP 解码器](https://pkg.go.dev/golang.org/x/image/webp@v0.48.0)。动画识别依据 [PNG 规范](https://www.w3.org/TR/png-3/#apng-frame-based-animation)与 [WebP 容器规范](https://developers.google.com/speed/webp/docs/riff_container)。运行 `go test ./internal/photo`，或在 Windows 运行完整 `npm run verify`。[测试](../../internal/photo/validate_test.go)使用独立编码的合成图和人工构造的损坏输入，无真实照片；空实现曾错误拒绝有效图，也未区分超限和读取失败。
