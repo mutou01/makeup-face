@@ -39,6 +39,8 @@ flowchart LR
 
 照片输入的格式、容量、尺寸、静态解码和原图预览契约见[本机照片校验](subsystems/photo-input.md)。选图和原图预览不依赖模型；用户主动分析面部时才加载经过校验的本机模型。[口红](subsystems/lipstick-preview.md)、[腮红](subsystems/blush-preview.md)和[眼影](subsystems/eyeshadow-preview.md)共用同一次分析，在工作原图上独立合成，试妆不保存项目数据。
 
+[本地推荐](subsystems/recommendations.md)按用户选的场景与妆感排序。它不读取图像或关键点；用户点击应用后，工作台只更新已定位的图层。
+
 ## 选型与退出条件
 
 | 决策                             | 理由与重新评估条件                                                                                                                                                                                                                                                                                                       |

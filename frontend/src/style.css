@@ -100,7 +100,8 @@ ol {
   gap: 0.5rem;
 }
 
-.photo-actions button {
+.photo-actions button,
+.preset-card button {
   border: 1px solid #d5c1d0;
   border-radius: 0.5rem;
   padding: 0.4rem 0.75rem;
@@ -109,7 +110,8 @@ ol {
   background: #f9f4f5;
 }
 
-.photo-actions button:disabled {
+.photo-actions button:disabled,
+.preset-card button:disabled {
   opacity: 0.65;
 }
 
@@ -119,4 +121,58 @@ ol {
   max-height: 20rem;
   margin-top: 1rem;
   image-orientation: from-image;
+}
+
+.recommendation-panel {
+  margin-top: 1.5rem;
+  padding: 0;
+  border: 0;
+}
+
+.recommendation-filters,
+.preset-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+
+.recommendation-filters select {
+  font: inherit;
+  color: inherit;
+}
+
+.preset-list {
+  display: grid;
+  gap: 0.75rem;
+  padding-left: 1.5rem;
+}
+
+.preset-card {
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #e4d7e0;
+  border-radius: 0.75rem;
+}
+
+.preset-card h3,
+.preset-card p {
+  margin: 0 0 0.3rem;
+}
+
+.preset-card button {
+  margin-top: 0.45rem;
+}
+
+.preset-palette {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82rem;
+}
+
+.preset-swatch {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin-right: 0.25em;
+  border-radius: 50%;
 }
