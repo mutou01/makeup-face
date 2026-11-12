@@ -205,6 +205,51 @@ test(
     }),
 );
 
+test(
+  "本地推荐始终显示三套预设，并按场景和妆感可复现地排序",
+  { timeout: 45_000 },
+  () =>
+    withDesktop(async (page) => {
+      const panel = page.getByRole("region", { name: "妆容推荐" });
+      const list = panel.getByRole("list", { name: "推荐方案" });
+      const titles = () => list.getByRole("heading").allTextContents();
+      await list.waitFor({ timeout: 5_000 });
+      const defaultOrder = ["日常豆沙", "蜜桃暖妆", "莓果夜妆"];
+      assert.deepEqual(await titles(), defaultOrder);
+      const card = list.getByRole("listitem").first();
+      for (const color of ["#A55262", "#C97881", "#99716C"]) {
+        await card
+          .getByText(color, { exact: false })
+          .waitFor({ timeout: 5_000 });
+      }
+      await card
+        .getByText("通用推荐", { exact: false })
+        .waitFor({ timeout: 5_000 });
+
+      const scene = panel.getByLabel("场景", { exact: true });
+      const look = panel.getByLabel("妆感偏好", { exact: true });
+      await scene.selectOption({ label: "聚会" });
+      await look.selectOption({ label: "暖色" });
+      assert.deepEqual(await titles(), ["莓果夜妆", "蜜桃暖妆", "日常豆沙"]);
+      await list
+        .getByRole("listitem")
+        .first()
+        .getByText("符合聚会场景", { exact: false })
+        .waitFor({ timeout: 5_000 });
+      await list
+        .getByRole("listitem")
+        .filter({
+          has: page.getByRole("heading", { name: "蜜桃暖妆", exact: true }),
+        })
+        .getByText("符合暖色偏好", { exact: false })
+        .waitFor({ timeout: 5_000 });
+      await scene.selectOption({ label: "不限场景" });
+      assert.deepEqual(await titles(), ["蜜桃暖妆", "日常豆沙", "莓果夜妆"]);
+      await look.selectOption({ label: "不限妆感" });
+      assert.deepEqual(await titles(), defaultOrder);
+    }),
+);
+
 async function pixels(canvas) {
   const result = await canvas.evaluate((element) => {
     const { width, height } = element;

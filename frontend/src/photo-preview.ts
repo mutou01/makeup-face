@@ -1,5 +1,6 @@
 import { detectFaces, prepareFaceFrame } from "./face-analysis";
 import { prepareMakeup } from "./makeup-preview";
+import { mountRecommendations } from "./recommendation-panel";
 
 type PickResult = { url?: string; message?: string };
 
@@ -83,7 +84,9 @@ export function mountPhotoPreview(section: HTMLElement) {
         ${layerMarkup("eyeshadow", "眼影", "#835d79", 50)}
       </div>
     </div>
+    <section id="recommendations" class="recommendation-panel" aria-labelledby="recommendation-title"></section>
   `;
+  mountRecommendations(section.querySelector<HTMLElement>("#recommendations")!);
   const pick = section.querySelector<HTMLButtonElement>("#pick-photo")!;
   const clear = section.querySelector<HTMLButtonElement>("#clear-photo")!;
   const analyse = section.querySelector<HTMLButtonElement>("#analyse-face")!;
