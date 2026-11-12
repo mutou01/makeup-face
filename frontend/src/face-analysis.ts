@@ -1,4 +1,4 @@
-type Point = { x: number; y: number };
+export type Point = { x: number; y: number };
 type Landmarker = {
   detect: (frame: HTMLCanvasElement) => { faceLandmarks: Point[][] };
   close: () => void;
