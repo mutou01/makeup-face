@@ -17,7 +17,7 @@ func main() {
 		log.Fatal(err)
 	}
 	preview := &PhotoPreviewService{}
-	providerService := &ProviderService{store: desktopProviderStore()}
+	providerService := &ProviderService{store: desktopProviderStore(), client: desktopProviderClient()}
 	faceRoot, faceFixture := desktopFaceRuntime()
 	app := application.New(application.Options{
 		Name:        "MakeupMirror",

@@ -8,7 +8,7 @@
 - [本机项目](project-workspace.md)：单照片项目、保存与恢复。
 - [照片质量门禁](face-quality.md)：取景、头部姿态和重拍提示。
 - [日志与供应商](foundation.md)：日志设计与供应商边界。
-- [AI 解释](ai-explanation.md)：本机供应商设置和密钥管理。
+- [AI 解释](ai-explanation.md)：本机设置、密钥管理、按需请求与失败回退。
 
 These pages describe what each part of the project is responsible for, how it
 runs, what state it keeps, and the contracts it keeps with its callers. Start

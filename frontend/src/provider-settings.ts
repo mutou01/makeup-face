@@ -1,23 +1,9 @@
-type View = {
-  enabled: boolean;
-  endpoint: string;
-  model: string;
-  hasKey: boolean;
-  warning?: string;
-};
+import { providerSettings, type ProviderView } from "./provider-client";
 
-async function call<T>(
-  method: "GetSettings" | "SaveSettings" | "ForgetKey",
-  ...args: unknown[]
-): Promise<T> {
-  const url = "/wails/runtime.js";
-  const runtime: {
-    Call: { ByName: (name: string, ...args: unknown[]) => Promise<T> };
-  } = await import(/* @vite-ignore */ url);
-  return runtime.Call.ByName(`main.ProviderService.${method}`, ...args);
-}
-
-export function mountProviderSettings(panel: HTMLElement) {
+export function mountProviderSettings(
+  panel: HTMLElement,
+  onChange: (view: ProviderView | null) => void,
+) {
   panel.innerHTML = `
     <h2 id="provider-title">AI 解释设置</h2>
     <p>可选功能。启用后也只有点击生成时才会联系所配置的供应商。</p>
@@ -49,7 +35,8 @@ export function mountProviderSettings(panel: HTMLElement) {
   const forget = panel.querySelector<HTMLButtonElement>("#provider-forget")!;
   const status = panel.querySelector('[role="status"]')!;
 
-  function render(view: View) {
+  let current: ProviderView | null = null;
+  function render(view: ProviderView) {
     enabled.checked = view.enabled;
     endpoint.value = view.endpoint;
     model.value = view.model;
@@ -63,16 +50,19 @@ export function mountProviderSettings(panel: HTMLElement) {
       error instanceof Error ? error.message : "供应商设置未保存。";
   }
 
-  async function run(action: () => Promise<View>, message: string) {
+  async function run(action: () => Promise<ProviderView>, message: string) {
     fields.disabled = true;
+    onChange(null);
     try {
       const view = await action();
+      current = view;
       render(view);
       status.textContent = view.warning ? `${message}${view.warning}` : message;
     } catch (error) {
       failure(error);
     } finally {
       fields.disabled = false;
+      onChange(current);
     }
   }
 
@@ -85,11 +75,17 @@ export function mountProviderSettings(panel: HTMLElement) {
       key: key.value,
     };
     key.value = "";
-    void run(() => call<View>("SaveSettings", input), "供应商设置已保存。");
+    void run(
+      () => providerSettings("SaveSettings", input),
+      "供应商设置已保存。",
+    );
   });
   forget.addEventListener("click", () => {
     key.value = "";
-    void run(() => call<View>("ForgetKey"), "已清除密钥，AI 解释已关闭。");
+    void run(
+      () => providerSettings("ForgetKey"),
+      "已清除密钥，AI 解释已关闭。",
+    );
   });
-  void run(() => call<View>("GetSettings"), "");
+  void run(() => providerSettings("GetSettings"), "");
 }

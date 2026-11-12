@@ -3,12 +3,15 @@
 package main
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"makeupmirror/internal/provider"
 )
+
+func desktopProviderClient() *http.Client { return provider.NewHTTPClient() }
 
 func desktopProviderStore() *provider.Store {
 	directory, err := os.UserCacheDir()

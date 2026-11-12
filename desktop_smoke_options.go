@@ -4,8 +4,11 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -27,6 +30,23 @@ func (v memoryVault) Delete(target string) error { clear(v[target]); delete(v, t
 
 func desktopProviderStore() *provider.Store {
 	return provider.NewStore(os.Getenv("MAKEUPMIRROR_SMOKE_PROFILE"), memoryVault{})
+}
+
+type fixtureTransport struct{ address string }
+
+func (transport fixtureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	host, port, err := net.SplitHostPort(transport.address)
+	if err != nil || host != "127.0.0.1" || port == "" || req.URL.Scheme != "https" || req.URL.Host != "fixture.test" {
+		return nil, errors.New("只允许访问验收用本机供应商")
+	}
+	copy := req.Clone(req.Context())
+	copy.URL.Scheme = "http"
+	copy.URL.Host = transport.address
+	return (&http.Transport{DisableKeepAlives: true}).RoundTrip(copy)
+}
+
+func desktopProviderClient() *http.Client {
+	return &http.Client{Transport: fixtureTransport{address: os.Getenv("MAKEUPMIRROR_SMOKE_PROVIDER_ADDR")}}
 }
 
 func desktopFaceRuntime() (string, bool) {

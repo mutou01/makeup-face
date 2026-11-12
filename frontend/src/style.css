@@ -193,3 +193,16 @@ ol {
   font: inherit;
   color: inherit;
 }
+
+.preset-id {
+  display: block;
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  color: #654860;
+}
+
+.preset-card .explanation-result {
+  margin-top: 0.4rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

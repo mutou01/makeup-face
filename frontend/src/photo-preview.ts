@@ -156,9 +156,6 @@ export function mountPhotoPreview(section: HTMLElement) {
     <section id="recommendations" class="recommendation-panel" aria-labelledby="recommendation-title"></section>
     <section id="provider-settings" class="recommendation-panel" aria-labelledby="provider-title"></section>
   `;
-  mountProviderSettings(
-    section.querySelector<HTMLElement>("#provider-settings")!,
-  );
   const pick = section.querySelector<HTMLButtonElement>("#pick-photo")!;
   const clear = section.querySelector<HTMLButtonElement>("#clear-photo")!;
   const exportPreview =
@@ -191,6 +188,10 @@ export function mountPhotoPreview(section: HTMLElement) {
   const recommendations = mountRecommendations(
     section.querySelector<HTMLElement>("#recommendations")!,
     applyPreset,
+  );
+  mountProviderSettings(
+    section.querySelector<HTMLElement>("#provider-settings")!,
+    recommendations.setProvider,
   );
 
   function setBusy(busy: boolean) {
@@ -370,6 +371,7 @@ export function mountPhotoPreview(section: HTMLElement) {
   }
 
   async function selectProject(operation: "CreateProject" | "OpenProject") {
+    recommendations.cancelExplanation();
     setBusy(true);
     try {
       const result = await call<ProjectResult>(operation);
@@ -422,6 +424,7 @@ export function mountPhotoPreview(section: HTMLElement) {
   });
 
   closeProject.addEventListener("click", async () => {
+    recommendations.cancelExplanation();
     setBusy(true);
     try {
       if (!(await call<boolean>("CloseProject"))) throw new Error();

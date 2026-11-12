@@ -11,6 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:net";
+import { createServer as createHTTPServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -322,6 +323,179 @@ test("供应商默认关闭，只保存 HTTPS 设置且不回填密钥", { timeo
       undefined,
     );
   }),
+);
+
+test(
+  "AI 解释只按点击发送三个允许字段，失败保留本地理由且关闭项目会取消",
+  { timeout: 45_000 },
+  async () => {
+    const calls = [];
+    const marker = `fixture-${randomUUID()}`;
+    const held = Promise.withResolvers();
+    const canceled = Promise.withResolvers();
+    const server = createHTTPServer(async (req, res) => {
+      let body = "";
+      for await (const part of req) body += part.toString("utf8");
+      calls.push({
+        url: req.url,
+        method: req.method,
+        auth: req.headers.authorization,
+        body,
+      });
+      if (calls.length === 1) {
+        res.setHeader("Content-Type", "application/json");
+        res.end(
+          JSON.stringify({
+            choices: [{ message: { content: "<em>模拟供应商说明</em>" } }],
+          }),
+        );
+      } else if (calls.length === 2) {
+        res
+          .writeHead(302, { Location: "https://fixture.test/redirected" })
+          .end();
+      } else if (calls.length === 3) {
+        res.end("invalid json");
+      } else if (calls.length === 4) {
+        res.on("close", () => canceled.resolve(true));
+        held.resolve(true);
+      } else {
+        res.writeHead(500).end();
+      }
+    });
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    try {
+      await withDesktop(
+        async (page) => {
+          const settings = page.getByRole("region", { name: "AI 解释设置" });
+          const panel = page.getByRole("region", { name: "妆容推荐" });
+          const generate = panel.getByRole("button", {
+            name: "生成莓果夜妆的 AI 解释",
+          });
+          await panel
+            .getByRole("heading", { name: "莓果夜妆" })
+            .waitFor({ timeout: 5_000 });
+          assert.equal(await generate.count(), 0);
+          await settings
+            .getByLabel("HTTPS 接口", { exact: true })
+            .fill("https://fixture.test/v1/chat/completions");
+          await settings
+            .getByLabel("模型编号", { exact: true })
+            .fill("fixture-model");
+          await settings.getByLabel("供应商密钥", { exact: true }).fill(marker);
+          await settings
+            .getByRole("checkbox", { name: "启用 AI 解释" })
+            .check({ timeout: 5_000 });
+          await settings
+            .getByRole("button", { name: "保存供应商设置" })
+            .click({ timeout: 5_000 });
+          await settings
+            .getByText("供应商设置已保存。", { exact: true })
+            .waitFor({ timeout: 5_000 });
+          await panel
+            .getByLabel("场景", { exact: true })
+            .selectOption({ label: "聚会" });
+          await panel
+            .getByLabel("妆感偏好", { exact: true })
+            .selectOption({ label: "暖色" });
+          await panel
+            .getByText("fixture.test", { exact: false })
+            .waitFor({ timeout: 5_000 });
+          assert.equal(calls.length, 0);
+          const reason = panel.getByText("符合聚会场景", { exact: false });
+          await generate.click({ timeout: 5_000 });
+          await panel
+            .getByText("<em>模拟供应商说明</em>", { exact: true })
+            .waitFor({ timeout: 5_000 });
+          assert.equal(await panel.locator("em").count(), 0);
+          await reason.waitFor({ timeout: 5_000 });
+          assert.equal(calls.length, 1);
+          assert.equal(calls[0].url, "/v1/chat/completions");
+          assert.equal(calls[0].method, "POST");
+          assert.ok(
+            calls[0].auth === `Bearer ${marker}`,
+            "仅在鉴权头发送测试密钥",
+          );
+          const payload = JSON.parse(calls[0].body);
+          assert.deepEqual(Object.keys(payload).sort(), [
+            "max_tokens",
+            "messages",
+            "model",
+            "stream",
+          ]);
+          assert.equal(payload.model, "fixture-model");
+          assert.deepEqual(
+            payload.messages.map((message) => message.role),
+            ["system", "user"],
+          );
+          assert.deepEqual(JSON.parse(payload.messages[1].content), {
+            scene: "party",
+            look: "warm",
+            preset_id: "party-berry",
+          });
+          assert.ok(!calls[0].body.includes(marker));
+
+          const fallback = panel.getByText(
+            "AI 解释暂不可用，仍可参考本地说明。",
+            { exact: true },
+          );
+          for (const count of [2, 3]) {
+            await generate.click({ timeout: 5_000 });
+            await fallback.waitFor({ timeout: 5_000 });
+            await reason.waitFor({ timeout: 5_000 });
+            assert.equal(calls.length, count, "失败不重试、不跟随重定向");
+          }
+
+          const project = page.getByRole("region", { name: "本机项目" });
+          await project
+            .getByRole("button", { name: "新建项目" })
+            .click({ timeout: 5_000 });
+          await project
+            .getByText("项目已新建。", { exact: true })
+            .waitFor({ timeout: 5_000 });
+          await generate.click({ timeout: 5_000 });
+          assert.equal(
+            await Promise.race([
+              held.promise,
+              delay(5_000, false, { ref: false }),
+            ]),
+            true,
+          );
+          await project
+            .getByRole("button", { name: "关闭项目" })
+            .click({ timeout: 5_000 });
+          assert.equal(
+            await Promise.race([
+              canceled.promise,
+              delay(5_000, false, { ref: false }),
+            ]),
+            true,
+          );
+          await settings
+            .getByRole("checkbox", { name: "启用 AI 解释" })
+            .uncheck({ timeout: 5_000 });
+          await settings
+            .getByRole("button", { name: "保存供应商设置" })
+            .click({ timeout: 5_000 });
+          await generate.waitFor({ state: "hidden", timeout: 5_000 });
+          assert.equal(calls.length, 4);
+        },
+        async (profile) => {
+          const directory = join(profile, "ai-workspace");
+          await mkdir(directory);
+          return {
+            MAKEUPMIRROR_SMOKE_PROJECT_DIRS: JSON.stringify([directory]),
+            MAKEUPMIRROR_SMOKE_PROVIDER_ADDR: `127.0.0.1:${server.address().port}`,
+          };
+        },
+      );
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  },
 );
 
 async function pixels(canvas) {

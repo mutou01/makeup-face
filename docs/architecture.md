@@ -41,6 +41,8 @@ flowchart LR
 
 [本地推荐](subsystems/recommendations.md)按用户选的场景与妆感排序。它不读取图像或关键点；用户点击应用后，工作台只更新已定位的图层。
 
+[可选 AI 解释](subsystems/ai-explanation.md)默认关闭，只在用户主动点击时由 Go 请求单一 HTTPS 供应商。解释与排序、照片和渲染分开；网络失败回到本地理由。
+
 ## 选型与退出条件
 
 | 决策                             | 理由与重新评估条件                                                                                                                                                                                                                                                                                                       |
