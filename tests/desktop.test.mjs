@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -81,7 +89,7 @@ async function withDesktop(run, prepare = async () => ({})) {
     const page =
       context.pages()[0] ??
       (await context.waitForEvent("page", { timeout: 5_000 }));
-    await run(page);
+    await run(page, profile);
   } finally {
     await browser?.close().catch(() => {});
     if (child && exit === undefined) child.kill();
@@ -263,6 +271,312 @@ async function pixels(canvas) {
   return { ...result, bytes: Buffer.from(result.bytes, "base64") };
 }
 
+test(
+  "本机项目只在空目录新建，手动保存后可恢复照片、妆容与偏好",
+  { timeout: 60_000 },
+  () =>
+    withDesktop(
+      async (page, profile) => {
+        const panel = page.getByRole("region", { name: "本机项目" });
+        const create = panel.getByRole("button", { name: "新建项目" });
+        const save = panel.getByRole("button", { name: "保存项目" });
+        const open = panel.getByRole("button", { name: "打开项目" });
+        const close = panel.getByRole("button", { name: "关闭项目" });
+        const projectFile = join(profile, "workspace", "project.json");
+        await create.click({ timeout: 5_000 });
+        await panel
+          .getByText("请选择空目录", { exact: false })
+          .waitFor({ timeout: 5_000 });
+        assert.equal(
+          await readFile(join(profile, "occupied", "keep.txt"), "utf8"),
+          "keep",
+        );
+        await assert.rejects(
+          access(join(profile, "occupied", "project.json")),
+          { code: "ENOENT" },
+        );
+        await create.click({ timeout: 5_000 });
+        await panel
+          .getByText("项目已新建", { exact: false })
+          .waitFor({ timeout: 5_000 });
+
+        await page
+          .getByRole("button", { name: "选择本机照片" })
+          .click({ timeout: 5_000 });
+        await page
+          .getByRole("button", { name: "分析面部" })
+          .click({ timeout: 5_000 });
+        const canvas = page.getByRole("img", { name: "试妆预览" });
+        await canvas.waitFor({ timeout: 5_000 });
+        const scene = page.getByLabel("场景", { exact: true });
+        const look = page.getByLabel("妆感偏好", { exact: true });
+        await scene.selectOption({ label: "聚会" }, { timeout: 5_000 });
+        await look.selectOption({ label: "暖色" }, { timeout: 5_000 });
+        await page
+          .getByRole("button", { name: "应用莓果夜妆" })
+          .click({ timeout: 5_000 });
+        const lipstick = page.getByRole("slider", { name: "口红强度" });
+        await lipstick.press("ArrowLeft", { timeout: 5_000 });
+        const beforeSave = await pixels(canvas);
+        assert.equal(
+          JSON.parse(await readFile(projectFile, "utf8")).photo,
+          undefined,
+          "选择照片不应自动写入项目",
+        );
+        await save.click({ timeout: 5_000 });
+        await panel
+          .getByText("项目已保存", { exact: false })
+          .waitFor({ timeout: 5_000 });
+        const onDisk = await readFile(projectFile, "utf8");
+        const saved = JSON.parse(onDisk);
+        assert.equal(saved.version, 1);
+        assert.deepEqual(
+          Buffer.from(saved.photo.bytes, "base64"),
+          await readFile(join(profile, "portrait.png")),
+        );
+        assert.equal(saved.draft.layers.lipstick.strength, 75);
+
+        await close.click({ timeout: 5_000 });
+        await canvas.waitFor({ state: "hidden", timeout: 5_000 });
+        await open.click({ timeout: 5_000 });
+        await panel
+          .getByText("项目已打开", { exact: false })
+          .waitFor({ timeout: 5_000 });
+        await canvas.waitFor({ timeout: 10_000 });
+        assert.equal(await lipstick.inputValue(), "75");
+        assert.equal(await scene.inputValue(), "party");
+        assert.equal(await look.inputValue(), "warm");
+        assert.ok(
+          (await pixels(canvas)).bytes.equals(beforeSave.bytes),
+          "重开应恢复相同的试妆画布",
+        );
+
+        await writeFile(projectFile, `${onDisk}\n`);
+        await save.click({ timeout: 5_000 });
+        await panel
+          .getByText("项目文件已被修改", { exact: false })
+          .waitFor({ timeout: 5_000 });
+        assert.equal(await readFile(projectFile, "utf8"), `${onDisk}\n`);
+      },
+      async (profile) => {
+        const occupied = join(profile, "occupied");
+        const workspace = join(profile, "workspace");
+        await mkdir(occupied);
+        await mkdir(workspace);
+        await writeFile(join(occupied, "keep.txt"), "keep");
+        return {
+          ...(await makeupFixture(profile, ["portrait"])),
+          MAKEUPMIRROR_SMOKE_PROJECT_DIRS: JSON.stringify([
+            occupied,
+            workspace,
+            workspace,
+          ]),
+        };
+      },
+    ),
+);
+
+test(
+  "导出 PNG 与当前试妆像素一致，去除原图元数据且不覆盖文件",
+  { timeout: 45_000 },
+  () =>
+    withDesktop(
+      async (page, profile) => {
+        const exportButton = page.getByRole("button", { name: "导出预览" });
+        await exportButton.waitFor({ timeout: 5_000 });
+        assert.equal(await exportButton.isDisabled(), true);
+        await page
+          .getByRole("button", { name: "选择本机照片" })
+          .click({ timeout: 5_000 });
+        await page
+          .getByRole("button", { name: "分析面部" })
+          .click({ timeout: 5_000 });
+        const canvas = page.getByRole("img", { name: "试妆预览" });
+        await canvas.waitFor({ timeout: 5_000 });
+        await page
+          .getByRole("button", { name: "应用莓果夜妆" })
+          .click({ timeout: 5_000 });
+
+        await exportButton.click({ timeout: 5_000 });
+        await page
+          .getByText("文件已存在，未覆盖", { exact: false })
+          .waitFor({ timeout: 5_000 });
+        assert.equal(
+          await readFile(join(profile, "existing.png"), "utf8"),
+          "keep me",
+        );
+        await exportButton.click({ timeout: 5_000 });
+        await page
+          .getByText("预览已导出", { exact: false })
+          .waitFor({ timeout: 5_000 });
+        const raw = await readFile(join(profile, "exported.png"));
+        assert.equal(raw.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+        const source = await readFile(join(profile, "portrait.png"));
+        assert.ok(
+          source.includes("eXIf") && source.includes("PRIVATE_TEST_TAG"),
+        );
+        const chunks = [];
+        for (let at = 8; at < raw.length;) {
+          const size = raw.readUInt32BE(at);
+          chunks.push(raw.toString("ascii", at + 4, at + 8));
+          at += size + 12;
+        }
+        assert.deepEqual([...new Set(chunks)], ["IHDR", "IDAT", "IEND"]);
+        assert.ok(
+          await canvas.evaluate(
+            async (expected, bytes) => {
+              const bitmap = await createImageBitmap(
+                new Blob([Uint8Array.from(bytes)], { type: "image/png" }),
+              );
+              if (
+                bitmap.width !== expected.width ||
+                bitmap.height !== expected.height
+              )
+                return false;
+              const copy = document.createElement("canvas");
+              copy.width = bitmap.width;
+              copy.height = bitmap.height;
+              const ctx = copy.getContext("2d");
+              ctx.drawImage(bitmap, 0, 0);
+              bitmap.close();
+              const actual = ctx.getImageData(
+                0,
+                0,
+                copy.width,
+                copy.height,
+              ).data;
+              const wanted = expected
+                .getContext("2d")
+                .getImageData(0, 0, copy.width, copy.height).data;
+              return actual.every((n, i) => n === wanted[i]);
+            },
+            [...raw],
+          ),
+          "导出的 PNG 解码像素应与当前画布相同",
+        );
+      },
+      async (profile) => {
+        const env = await makeupFixture(profile, ["portrait"]);
+        await writeFile(
+          join(profile, "portrait.png"),
+          Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAPAAAADwAQMAAAAEm3vRAAAABlBMVEWnX2QAAACveaDXAAAAOGVYSWZNTQAqAAAACAACARIAAwAAAAEAAQAAATsAAgAAABEAAAAmAAAAAFBSSVZBVEVfVEVTVF9UQUcAAKN9y4EAAAAeSURBVHja7cEBDQAAAMKg909tDwcUAAAAAAAAwKcBHRAAAVCb7wMAAAAASUVORK5CYII=",
+            "base64",
+          ),
+        );
+        const existing = join(profile, "existing.png");
+        await writeFile(existing, "keep me");
+        return {
+          ...env,
+          MAKEUPMIRROR_SMOKE_EXPORT_PATHS: JSON.stringify([
+            existing,
+            join(profile, "exported.png"),
+          ]),
+        };
+      },
+    ),
+);
+
+test(
+  "移除项目照片只清除保存副本和妆容，保留原件、偏好和其他文件",
+  { timeout: 45_000 },
+  () =>
+    withDesktop(
+      async (page, profile) => {
+        const project = page.getByRole("region", { name: "本机项目" });
+        const remove = project.getByRole("button", { name: "移除项目照片" });
+        await remove.waitFor({ timeout: 5_000 });
+        assert.equal(await remove.isDisabled(), true);
+        const original = join(profile, "portrait.png");
+        const bytes = await readFile(original);
+        const workspace = join(profile, "workspace");
+        const snapshot = join(workspace, "project.json");
+        const other = join(workspace, "notes.txt");
+        await project
+          .getByRole("button", { name: "新建项目" })
+          .click({ timeout: 5_000 });
+        await project
+          .getByText("项目已新建。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        await writeFile(other, "untouched");
+        await page
+          .getByRole("button", { name: "选择本机照片" })
+          .click({ timeout: 5_000 });
+        await page
+          .getByRole("button", { name: "分析面部" })
+          .click({ timeout: 5_000 });
+        await page
+          .getByRole("button", { name: "应用蜜桃暖妆" })
+          .click({ timeout: 5_000 });
+        const scene = page.getByLabel("场景", { exact: true });
+        const look = page.getByLabel("妆感偏好", { exact: true });
+        await scene.selectOption({ label: "拍照" }, { timeout: 5_000 });
+        await look.selectOption({ label: "暖色" }, { timeout: 5_000 });
+        await project
+          .getByRole("button", { name: "保存项目" })
+          .click({ timeout: 5_000 });
+        await project
+          .getByText("项目已保存。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        assert.ok(
+          JSON.parse(await readFile(snapshot, "utf8")).draft.layers.eyeshadow
+            .enabled,
+        );
+
+        await page
+          .getByRole("button", { name: "清除预览" })
+          .click({ timeout: 5_000 });
+        await page
+          .getByText("已清除预览。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        assert.ok(
+          JSON.parse(await readFile(snapshot, "utf8")).photo,
+          "清除预览不应移除保存照片",
+        );
+        await remove.click({ timeout: 5_000 });
+        await project
+          .getByText("项目照片和妆容已移除。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        const remaining = JSON.parse(await readFile(snapshot, "utf8"));
+        assert.equal(remaining.photo, undefined);
+        assert.equal(remaining.draft, undefined);
+        assert.deepEqual(remaining.preferences, {
+          scene: "photo",
+          look: "warm",
+        });
+        assert.deepEqual(await readFile(original), bytes);
+        assert.equal(await readFile(other, "utf8"), "untouched");
+
+        await project
+          .getByRole("button", { name: "关闭项目" })
+          .click({ timeout: 5_000 });
+        await project
+          .getByRole("button", { name: "打开项目" })
+          .click({ timeout: 5_000 });
+        await project
+          .getByText("项目已打开。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        await page
+          .getByRole("img", { name: "本机原图预览" })
+          .waitFor({ state: "hidden", timeout: 5_000 });
+        assert.equal(await scene.inputValue(), "photo");
+        assert.equal(await look.inputValue(), "warm");
+        assert.equal(await remove.isDisabled(), true);
+      },
+      async (profile) => {
+        const workspace = join(profile, "workspace");
+        await mkdir(workspace);
+        return {
+          ...(await makeupFixture(profile, ["portrait"])),
+          MAKEUPMIRROR_SMOKE_PROJECT_DIRS: JSON.stringify([
+            workspace,
+            workspace,
+          ]),
+        };
+      },
+    ),
+);
+
 function countChanges(before, after, regions) {
   const inside = regions.map(() => 0);
   let outside = 0;
@@ -307,7 +621,7 @@ if (realPhoto || realRuntime) {
     { timeout: 60_000 },
     () =>
       withDesktop(
-        async (page) => {
+        async (page, profile) => {
           const region = (process.env.MAKEUPMIRROR_REAL_LIP_BOUNDS ?? "")
             .split(",")
             .map(Number);
@@ -462,11 +776,69 @@ if (realPhoto || realRuntime) {
               `真人预设验收：唇部、双颊和双眼共五处变化 ${combined.inside.join("、")} 个像素，范围外 0。`,
             );
           }
+          if (process.env.MAKEUPMIRROR_REAL_PROJECT === "1") {
+            const workspace = page.getByRole("region", { name: "本机项目" });
+            const click = (name) =>
+              workspace
+                .getByRole("button", { name, exact: true })
+                .click({ timeout: 5_000 });
+            const wait = (message) =>
+              workspace
+                .getByText(message, { exact: true })
+                .waitFor({ timeout: 10_000 });
+            const prior = await pixels(canvas);
+            await click("新建项目");
+            await wait("项目已新建。");
+            await click("保存项目");
+            await wait("项目已保存。");
+            await page
+              .getByRole("button", { name: "导出预览" })
+              .click({ timeout: 5_000 });
+            await page
+              .getByText("预览已导出。", { exact: true })
+              .waitFor({ timeout: 10_000 });
+            const exported = await readFile(join(profile, "real-export.png"));
+            assert.equal(exported.readUInt32BE(16), prior.width);
+            assert.equal(exported.readUInt32BE(20), prior.height);
+            await click("关闭项目");
+            await click("打开项目");
+            await wait("项目已打开。");
+            await canvas.waitFor({ timeout: 10_000 });
+            assert.ok((await pixels(canvas)).bytes.equals(prior.bytes));
+            await click("移除项目照片");
+            await wait("项目照片和妆容已移除。");
+            const remaining = JSON.parse(
+              await readFile(
+                join(profile, "real-workspace", "project.json"),
+                "utf8",
+              ),
+            );
+            assert.equal(remaining.photo, undefined);
+            assert.equal(remaining.draft, undefined);
+            assert.deepEqual(external, []);
+            console.log(
+              `真人项目验收：恢复 ${prior.width} × ${prior.height} 画布一致，导出 ${exported.length} 字节 PNG，项目照片和草稿可移除。`,
+            );
+          }
         },
-        async () => ({
-          MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify([realPhoto]),
-          MAKEUPMIRROR_SMOKE_FACE_DIR: realRuntime,
-        }),
+        async (profile) => {
+          const env = {
+            MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify([realPhoto]),
+            MAKEUPMIRROR_SMOKE_FACE_DIR: realRuntime,
+          };
+          if (process.env.MAKEUPMIRROR_REAL_PROJECT === "1") {
+            const workspace = join(profile, "real-workspace");
+            await mkdir(workspace);
+            env.MAKEUPMIRROR_SMOKE_PROJECT_DIRS = JSON.stringify([
+              workspace,
+              workspace,
+            ]);
+            env.MAKEUPMIRROR_SMOKE_EXPORT_PATHS = JSON.stringify([
+              join(profile, "real-export.png"),
+            ]);
+          }
+          return env;
+        },
       ),
   );
 }

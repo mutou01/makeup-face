@@ -17,6 +17,14 @@ func desktopPhotoPicker(window application.Window) func() (string, error) {
 	return nativePhotoPicker(window)
 }
 
+func desktopProjectPicker(window application.Window) func() (string, error) {
+	return nativeProjectPicker(window)
+}
+
+func desktopExportPicker(window application.Window) func() (string, error) {
+	return nativeExportPicker(window)
+}
+
 func desktopFaceRuntime() (string, bool) {
 	cache, err := os.UserCacheDir()
 	if err != nil {

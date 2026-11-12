@@ -10,4 +10,10 @@
 
 「妆容推荐」可按场景和妆感查看三套预设及理由。分析面部后可点击对应的「应用」按钮，载入可用图层的颜色和强度，再分别微调；切换筛选不会改动试妆。详见[推荐说明](subsystems/recommendations.md)。
 
+要稍后继续试妆，请在「本机项目」选择空目录新建，导入照片并点击「保存项目」。下次用「打开项目」选择该目录，即可恢复照片、妆容和偏好。关闭会丢弃未保存改动。详见[本机项目说明](subsystems/project-workspace.md)。
+
+点「导出预览」可将当前画布另存为 PNG。请选择新文件名；导出的 PNG 不包含原图元数据。
+
+「移除项目照片」会清除项目中的照片副本和妆容；原件、已保存的推荐偏好以及目录内的其他文件会保留。
+
 应用缺少 WebView2 时，按 [Microsoft 指引](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution)安装运行时。验收需要能够启动桌面应用的 Windows 会话，使用 `npm run verify`。测试程序、正式构建和本机资源的区别见[桌面启动说明](subsystems/desktop.md)。

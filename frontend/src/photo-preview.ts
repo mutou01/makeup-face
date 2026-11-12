@@ -1,16 +1,52 @@
 import { detectFaces, prepareFaceFrame } from "./face-analysis";
-import { prepareMakeup } from "./makeup-preview";
+import { prepareMakeup, type LayerSettings } from "./makeup-preview";
 import { mountRecommendations } from "./recommendation-panel";
 import type { Preset, PresetLayer } from "./recommendations";
 
 type PickResult = { url?: string; message?: string };
+type Preferences = {
+  scene: string;
+  look: string;
+};
+type Makeup = {
+  analyzed: boolean;
+  layers: Record<"lipstick" | "blush" | "eyeshadow", LayerSettings>;
+};
+type Draft = Preferences & Makeup;
+type ProjectResult = {
+  active: boolean;
+  url?: string;
+  message: string;
+  draft?: Makeup;
+  preferences?: Preferences;
+};
+type ProjectAction = { done: boolean; message: string };
+type Operation =
+  | "Pick"
+  | "Clear"
+  | "CreateProject"
+  | "OpenProject"
+  | "SaveProject"
+  | "CloseProject"
+  | "RemoveProjectPhoto"
+  | "ExportPreview";
 
-async function call<T>(operation: "Pick" | "Clear"): Promise<T> {
+async function call<T>(operation: Operation, ...args: unknown[]): Promise<T> {
   // Wails serves its runtime from the same embedded application origin.
   const runtimeURL = "/wails/runtime.js";
-  const runtime: { Call: { ByName: (name: string) => Promise<T> } } =
-    await import(/* @vite-ignore */ runtimeURL);
-  return runtime.Call.ByName(`main.PhotoPreviewService.${operation}`);
+  const runtime: {
+    Call: { ByName: (name: string, ...args: unknown[]) => Promise<T> };
+  } = await import(/* @vite-ignore */ runtimeURL);
+  return runtime.Call.ByName(`main.PhotoPreviewService.${operation}`, ...args);
+}
+
+async function loadPhoto(url: string) {
+  const image = new Image();
+  image.alt = "本机原图预览";
+  image.className = "photo-preview-image";
+  image.src = url;
+  await image.decode();
+  return image;
 }
 
 function layerMarkup(
@@ -53,17 +89,27 @@ function layerControls(editor: HTMLElement, id: string, onInput: () => void) {
   });
   for (const input of [enabled, color, strength])
     input.addEventListener("input", onInput);
+  function restore(layer: LayerSettings) {
+    enabled.checked = layer.enabled;
+    color.value = layer.color;
+    strength.valueAsNumber = layer.strength;
+    output.value = `${strength.value}%`;
+  }
   return {
     fieldset,
     reset: () => {
       enabled.checked = false;
     },
     apply: (preset: PresetLayer) => {
-      enabled.checked = true;
-      color.value = preset.color;
-      strength.valueAsNumber = preset.strength;
-      output.value = `${strength.value}%`;
+      restore({ ...preset, enabled: true });
     },
+    restore,
+    resetDefaults: () =>
+      restore({
+        enabled: false,
+        color: color.defaultValue,
+        strength: Number(strength.defaultValue),
+      }),
     settings: () => ({
       enabled: enabled.checked,
       color: color.value,
@@ -75,11 +121,25 @@ function layerControls(editor: HTMLElement, id: string, onInput: () => void) {
 export function mountPhotoPreview(section: HTMLElement) {
   section.innerHTML = `
     <h2 id="photo-preview-title">本机照片</h2>
-    <p class="sample-note">支持 JPEG、PNG、WebP。照片仅在本机用于本次试妆。</p>
+    <p class="sample-note">支持 JPEG、PNG、WebP。照片只在本机处理。</p>
+    <section class="recommendation-panel" aria-labelledby="project-title">
+      <h2 id="project-title">本机项目</h2>
+      <div class="photo-actions">
+        <button type="button" id="create-project">新建项目</button>
+        <button type="button" id="open-project">打开项目</button>
+        <button type="button" id="save-project" disabled>保存项目</button>
+        <button type="button" id="close-project" disabled>关闭项目</button>
+        <button type="button" id="remove-project-photo" disabled>移除项目照片</button>
+      </div>
+      <p>改动需手动保存。关闭项目会丢弃未保存的修改。</p>
+      <p>移除项目照片会清除项目副本和妆容，保留导入原件。</p>
+      <p id="project-status" class="status" role="status" aria-label="项目状态"></p>
+    </section>
     <div class="photo-actions">
       <button type="button" id="pick-photo">选择本机照片</button>
       <button type="button" id="analyse-face" disabled>分析面部</button>
       <button type="button" id="clear-photo" disabled>清除预览</button>
+      <button type="button" id="export-preview" disabled>导出预览</button>
     </div>
     <p id="photo-status" class="status" role="status" aria-label="照片处理状态"></p>
     <div id="photo-display"></div>
@@ -95,8 +155,22 @@ export function mountPhotoPreview(section: HTMLElement) {
   `;
   const pick = section.querySelector<HTMLButtonElement>("#pick-photo")!;
   const clear = section.querySelector<HTMLButtonElement>("#clear-photo")!;
+  const exportPreview =
+    section.querySelector<HTMLButtonElement>("#export-preview")!;
   const analyse = section.querySelector<HTMLButtonElement>("#analyse-face")!;
   const status = section.querySelector("#photo-status")!;
+  const createProject =
+    section.querySelector<HTMLButtonElement>("#create-project")!;
+  const openProject =
+    section.querySelector<HTMLButtonElement>("#open-project")!;
+  const saveProject =
+    section.querySelector<HTMLButtonElement>("#save-project")!;
+  const closeProject =
+    section.querySelector<HTMLButtonElement>("#close-project")!;
+  const removeProjectPhoto = section.querySelector<HTMLButtonElement>(
+    "#remove-project-photo",
+  )!;
+  const projectStatus = section.querySelector("#project-status")!;
   const display = section.querySelector<HTMLElement>("#photo-display")!;
   const editor = section.querySelector<HTMLElement>("#makeup-editor")!;
   const canvas = editor.querySelector("canvas")!;
@@ -105,6 +179,9 @@ export function mountPhotoPreview(section: HTMLElement) {
   const eyeshadow = layerControls(editor, "eyeshadow", updatePreview);
   let original: HTMLImageElement | undefined;
   let render: ReturnType<typeof prepareMakeup> = null;
+  let projectActive = false;
+  let hasSavedPhoto = false;
+  let restoreAnalysis = false;
   const recommendations = mountRecommendations(
     section.querySelector<HTMLElement>("#recommendations")!,
     applyPreset,
@@ -113,13 +190,19 @@ export function mountPhotoPreview(section: HTMLElement) {
   function setBusy(busy: boolean) {
     pick.disabled = busy;
     clear.disabled = busy || !original;
+    exportPreview.disabled = busy || !original;
     analyse.disabled = busy || !original || !!render;
     recommendations.setAvailable(!busy && render !== null);
+    createProject.disabled = openProject.disabled = busy || projectActive;
+    closeProject.disabled = busy || !projectActive;
+    saveProject.disabled = busy || !projectActive || !original;
+    removeProjectPhoto.disabled = busy || !projectActive || !hasSavedPhoto;
   }
 
   function setOriginal(image?: HTMLImageElement) {
     original = image;
     render = null;
+    restoreAnalysis = false;
     editor.hidden = true;
     canvas.width = canvas.height = 0;
     lipstick.reset();
@@ -151,9 +234,8 @@ export function mountPhotoPreview(section: HTMLElement) {
     return missing;
   }
 
-  analyse.addEventListener("click", async () => {
+  async function analysePhoto() {
     if (!original) return;
-    setBusy(true);
     status.textContent = "正在本机分析面部…";
     try {
       const frame = prepareFaceFrame(original);
@@ -170,6 +252,7 @@ export function mountPhotoPreview(section: HTMLElement) {
           status.textContent = "唇部轮廓不完整，请换一张清晰的正面照。";
           return;
         }
+        restoreAnalysis = true;
         blush.fieldset.hidden = !render.hasBlush;
         eyeshadow.fieldset.hidden = !render.hasEyeshadow;
         updatePreview();
@@ -185,6 +268,13 @@ export function mountPhotoPreview(section: HTMLElement) {
       }
     } catch {
       status.textContent = "本机人脸分析未能完成，可继续查看原图。";
+    }
+  }
+
+  analyse.addEventListener("click", async () => {
+    setBusy(true);
+    try {
+      await analysePhoto();
     } finally {
       setBusy(false);
     }
@@ -199,12 +289,9 @@ export function mountPhotoPreview(section: HTMLElement) {
         status.textContent = result.message ?? "未更换照片。";
         return;
       }
-      const image = new Image();
-      image.alt = "本机原图预览";
-      image.className = "photo-preview-image";
-      image.src = result.url;
+      let image: HTMLImageElement;
       try {
-        await image.decode();
+        image = await loadPhoto(result.url);
       } catch {
         setOriginal();
         await call<boolean>("Clear");
@@ -228,6 +315,124 @@ export function mountPhotoPreview(section: HTMLElement) {
       status.textContent = "已清除预览。";
     } catch {
       status.textContent = "无法清除预览，请重试。";
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  exportPreview.addEventListener("click", async () => {
+    if (!original) return;
+    setBusy(true);
+    try {
+      const frame = render ? canvas : prepareFaceFrame(original);
+      const encoded = frame.toDataURL("image/png").split(",", 2)[1];
+      if (!encoded) throw new Error("无法编码预览");
+      status.textContent = await call<string>("ExportPreview", encoded);
+    } catch {
+      status.textContent = "无法导出预览，请重试。";
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  function restoreDraft(draft?: Makeup, preferences?: Preferences) {
+    recommendations.restore(
+      preferences?.scene ?? "any",
+      preferences?.look ?? "any",
+    );
+    if (draft) {
+      lipstick.restore(draft.layers.lipstick);
+      blush.restore(draft.layers.blush);
+      eyeshadow.restore(draft.layers.eyeshadow);
+      restoreAnalysis = draft.analyzed;
+    } else {
+      lipstick.resetDefaults();
+      blush.resetDefaults();
+      eyeshadow.resetDefaults();
+    }
+  }
+
+  async function selectProject(operation: "CreateProject" | "OpenProject") {
+    setBusy(true);
+    try {
+      const result = await call<ProjectResult>(operation);
+      projectStatus.textContent = result.message;
+      if (!result.active) return;
+      projectActive = true;
+      hasSavedPhoto = !!result.url;
+      if (operation === "CreateProject") return;
+      setOriginal();
+      status.textContent = "";
+      if (result.url) {
+        try {
+          setOriginal(await loadPhoto(result.url));
+        } catch {
+          await call<boolean>("Clear");
+          status.textContent = "无法显示项目照片。";
+        }
+      }
+      restoreDraft(result.draft, result.preferences);
+      if (restoreAnalysis) await analysePhoto();
+    } catch {
+      projectStatus.textContent = "无法打开本机项目，请重试。";
+    } finally {
+      setBusy(false);
+    }
+  }
+  createProject.addEventListener("click", () => selectProject("CreateProject"));
+  openProject.addEventListener("click", () => selectProject("OpenProject"));
+
+  saveProject.addEventListener("click", async () => {
+    setBusy(true);
+    try {
+      const draft: Draft = {
+        ...recommendations.preferences(),
+        analyzed: restoreAnalysis,
+        layers: {
+          lipstick: lipstick.settings(),
+          blush: blush.settings(),
+          eyeshadow: eyeshadow.settings(),
+        },
+      };
+      const result = await call<ProjectAction>("SaveProject", draft);
+      projectStatus.textContent = result.message;
+      if (result.done) hasSavedPhoto = true;
+    } catch {
+      projectStatus.textContent = "无法保存本机项目，请重试。";
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  closeProject.addEventListener("click", async () => {
+    setBusy(true);
+    try {
+      if (!(await call<boolean>("CloseProject"))) throw new Error();
+      projectActive = false;
+      hasSavedPhoto = false;
+      setOriginal();
+      restoreDraft();
+      status.textContent = "";
+      projectStatus.textContent = "项目已关闭。";
+    } catch {
+      projectStatus.textContent = "无法关闭项目，请重试。";
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  removeProjectPhoto.addEventListener("click", async () => {
+    setBusy(true);
+    try {
+      const result = await call<ProjectAction>("RemoveProjectPhoto");
+      projectStatus.textContent = result.message;
+      if (!result.done) return;
+      hasSavedPhoto = false;
+      setOriginal();
+      restoreDraft(undefined, recommendations.preferences());
+      status.textContent = "";
+    } catch {
+      projectStatus.textContent = "无法移除项目照片，请重试。";
     } finally {
       setBusy(false);
     }
