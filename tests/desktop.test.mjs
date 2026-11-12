@@ -57,6 +57,8 @@ async function withDesktop(run, prepare = async () => ({})) {
     child = spawn(executable, [], {
       env: {
         ...process.env,
+        MAKEUPMIRROR_SMOKE_FACE_DIR: "",
+        MAKEUPMIRROR_SMOKE_FACE_FIXTURE: "",
         ...(await prepare(profile)),
         MAKEUPMIRROR_SMOKE_PORT: String(port),
         MAKEUPMIRROR_SMOKE_PROFILE: profile,
@@ -122,6 +124,14 @@ test(
           return [result.status, result.headers.get("cache-control")];
         }, first);
         assert.deepEqual(response, [200, "no-store"]);
+
+        await page
+          .getByRole("button", { name: "分析唇部" })
+          .click({ timeout: 5_000 });
+        await page
+          .getByText("本机人脸模型尚未安装", { exact: false })
+          .waitFor({ timeout: 5_000 });
+        assert.equal(await assertImage(2, 3), first);
 
         await pick.click({ timeout: 5_000 });
         await page
@@ -208,65 +218,244 @@ async function pixels(canvas) {
   return { ...result, bytes: Buffer.from(result.bytes, "base64") };
 }
 
+const realPhoto = process.env.MAKEUPMIRROR_REAL_PHOTO;
+const realRuntime = process.env.MAKEUPMIRROR_REAL_FACE_DIR;
+if (realPhoto || realRuntime) {
+  test(
+    "真人照片经本机模型定位后只在人工标定的嘴部范围改变像素",
+    { timeout: 60_000 },
+    () =>
+      withDesktop(
+        async (page) => {
+          const region = (process.env.MAKEUPMIRROR_REAL_LIP_BOUNDS ?? "")
+            .split(",")
+            .map(Number);
+          assert.ok(
+            realPhoto &&
+              realRuntime &&
+              region.length === 4 &&
+              region.every((n) => Number.isFinite(n) && n >= 0 && n <= 1) &&
+              region[0] < region[2] &&
+              region[1] < region[3],
+            "请提供本地真人照、真实模型目录与人工唇区范围",
+          );
+          const pick = page.getByRole("button", { name: "选择本机照片" });
+          await pick.waitFor({ timeout: 5_000 });
+          const origin = new URL(page.url()).origin;
+          const external = [];
+          const runtimeFailures = [];
+          page.on("request", (request) => {
+            const url = new URL(request.url());
+            if (
+              ["http:", "https:"].includes(url.protocol) &&
+              url.origin !== origin
+            )
+              external.push(url.origin);
+          });
+          page.on("response", (response) => {
+            const path = new URL(response.url()).pathname;
+            if (path.startsWith("/local-face-runtime/") && !response.ok())
+              runtimeFailures.push(`${response.status()} ${path}`);
+          });
+          page.on("console", (message) => {
+            if (message.type() === "error")
+              runtimeFailures.push(message.text());
+          });
+          await pick.click({ timeout: 5_000 });
+          await page
+            .getByRole("button", { name: "分析唇部" })
+            .click({ timeout: 10_000 });
+          const canvas = page.getByRole("img", { name: "口红试妆预览" });
+          await canvas.waitFor({ timeout: 25_000 }).catch(async () => {
+            assert.fail(
+              `真实模型未生成预览：${await page.getByRole("status").textContent()}；${runtimeFailures.join("；")}`,
+            );
+          });
+          const original = await pixels(canvas);
+          assert.equal(Math.max(original.width, original.height), 1024);
+          const enabled = page.getByRole("checkbox", { name: "启用口红" });
+          await enabled.check({ timeout: 5_000 });
+          const painted = await pixels(canvas);
+          let changed = 0;
+          let outside = 0;
+          for (let i = 0; i < original.bytes.length; i += 4) {
+            if (
+              original.bytes.readUInt32LE(i) === painted.bytes.readUInt32LE(i)
+            )
+              continue;
+            changed++;
+            const p = i / 4;
+            const x = (p % original.width) / original.width;
+            const y = Math.floor(p / original.width) / original.height;
+            if (
+              x < region[0] ||
+              x > region[2] ||
+              y < region[1] ||
+              y > region[3]
+            )
+              outside++;
+          }
+          assert.ok(changed >= 25, `实际改变像素太少：${changed}`);
+          assert.equal(outside, 0, "人工标定的嘴部范围外必须保持不变");
+          await enabled.uncheck({ timeout: 5_000 });
+          assert.ok(
+            (await pixels(canvas)).bytes.equals(original.bytes),
+            "关闭后恢复工作分辨率原图",
+          );
+          assert.deepEqual(external, []);
+          console.log(
+            `真人验收：${original.width} × ${original.height}，嘴部范围内 ${changed} 个像素变化，范围外 ${outside}，无外部请求。`,
+          );
+        },
+        async () => ({
+          MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify([realPhoto]),
+          MAKEUPMIRROR_SMOKE_FACE_DIR: realRuntime,
+        }),
+      ),
+  );
+}
+
 test(
-  "合成图口红可开关、改色、调强度，唇区外像素不变",
+  "选入照片后仅单人能试涂口红，唇区外和口腔像素不变",
   { timeout: 45_000 },
   () =>
-    withDesktop(async (page) => {
-      const preview = page.getByRole("img", { name: "口红试妆预览" });
-      const enabled = page.getByRole("checkbox", { name: "启用口红" });
-      const color = page.getByLabel("口红颜色");
-      const intensity = page.getByRole("slider", { name: "口红强度" });
-      await preview.waitFor({ timeout: 5_000 });
-      assert.equal(await enabled.isChecked(), false);
-      const original = await pixels(preview);
-      assert.equal(original.width, 240);
-      assert.equal(original.height, 240);
+    withDesktop(
+      async (page) => {
+        const pick = page.getByRole("button", { name: "选择本机照片" });
+        const analyse = page.getByRole("button", { name: "分析唇部" });
+        const preview = page.getByRole("img", { name: "口红试妆预览" });
+        const enabled = page.getByRole("checkbox", { name: "启用口红" });
+        const color = page.getByLabel("口红颜色");
+        const intensity = page.getByRole("slider", { name: "口红强度" });
+        await pick.click({ timeout: 5_000 });
+        await analyse.click({ timeout: 5_000 });
+        await preview.waitFor({ timeout: 5_000 });
+        assert.equal(await enabled.isChecked(), false);
+        const original = await pixels(preview);
+        assert.equal(original.width, 240);
+        assert.equal(original.height, 240);
 
-      await enabled.check({ timeout: 5_000 });
-      const painted = await pixels(preview);
-      let changed = 0;
-      let outside = 0;
-      for (let y = 0; y < original.height; y++) {
-        for (let x = 0; x < original.width; x++) {
-          const i = (y * original.width + x) * 4;
-          if (original.bytes.readUInt32LE(i) === painted.bytes.readUInt32LE(i))
-            continue;
-          changed++;
-          if (x < 85 || x > 155 || y < 140 || y > 180) outside++;
+        await enabled.check({ timeout: 5_000 });
+        const painted = await pixels(preview);
+        let changed = 0;
+        let outside = 0;
+        for (let y = 0; y < original.height; y++) {
+          for (let x = 0; x < original.width; x++) {
+            const i = (y * original.width + x) * 4;
+            if (
+              original.bytes.readUInt32LE(i) === painted.bytes.readUInt32LE(i)
+            )
+              continue;
+            changed++;
+            if (x < 85 || x > 155 || y < 140 || y > 180) outside++;
+          }
         }
-      }
-      assert.ok(changed > 0, "启用后应实际改变唇区像素");
-      assert.equal(outside, 0, "唇区之外不得改变任何像素");
-      const protectionPoint = (143 * original.width + 91) * 4;
-      assert.equal(
-        painted.bytes.readUInt32LE(protectionPoint),
-        original.bytes.readUInt32LE(protectionPoint),
-      );
+        assert.ok(changed > 0, "启用后应实际改变唇区像素");
+        assert.equal(outside, 0, "唇区之外不得改变任何像素");
+        const protectionPoint = (160 * original.width + 120) * 4;
+        assert.equal(
+          painted.bytes.readUInt32LE(protectionPoint),
+          original.bytes.readUInt32LE(protectionPoint),
+        );
 
-      await color.fill("#2556bf", { timeout: 5_000 });
-      const blue = await pixels(preview);
-      const lipPoint = (156 * original.width + 120) * 4;
-      assert.ok(blue.bytes[lipPoint] < painted.bytes[lipPoint]);
-      assert.ok(blue.bytes[lipPoint + 2] > painted.bytes[lipPoint + 2]);
+        await color.fill("#2556bf", { timeout: 5_000 });
+        const blue = await pixels(preview);
+        const lipPoint = (150 * original.width + 120) * 4;
+        assert.ok(blue.bytes[lipPoint] < painted.bytes[lipPoint]);
+        assert.ok(blue.bytes[lipPoint + 2] > painted.bytes[lipPoint + 2]);
 
-      await intensity.press("Home", { timeout: 5_000 });
-      assert.ok(
-        (await pixels(preview)).bytes.equals(original.bytes),
-        "零强度恢复原像素",
-      );
-      await intensity.press("End", { timeout: 5_000 });
-      const strongest = await pixels(preview);
-      assert.ok(strongest.bytes[lipPoint + 2] > blue.bytes[lipPoint + 2]);
-      await enabled.uncheck({ timeout: 5_000 });
-      assert.ok(
-        (await pixels(preview)).bytes.equals(original.bytes),
-        "关闭后恢复原像素",
-      );
-      await enabled.check({ timeout: 5_000 });
-      assert.ok(
-        (await pixels(preview)).bytes.equals(strongest.bytes),
-        "重新启用不能重复叠涂",
-      );
-    }),
+        await intensity.press("Home", { timeout: 5_000 });
+        assert.ok(
+          (await pixels(preview)).bytes.equals(original.bytes),
+          "零强度恢复原像素",
+        );
+        await intensity.press("End", { timeout: 5_000 });
+        const strongest = await pixels(preview);
+        assert.ok(strongest.bytes[lipPoint + 2] > blue.bytes[lipPoint + 2]);
+        await enabled.uncheck({ timeout: 5_000 });
+        assert.ok(
+          (await pixels(preview)).bytes.equals(original.bytes),
+          "关闭后恢复原像素",
+        );
+        await enabled.check({ timeout: 5_000 });
+        assert.ok(
+          (await pixels(preview)).bytes.equals(strongest.bytes),
+          "重新启用不能重复叠涂",
+        );
+
+        for (const message of ["没有检测到人脸", "检测到多张人脸"]) {
+          await pick.click({ timeout: 5_000 });
+          await analyse.click({ timeout: 5_000 });
+          await page
+            .getByText(message, { exact: false })
+            .waitFor({ timeout: 5_000 });
+          await preview.waitFor({ state: "hidden", timeout: 5_000 });
+          await page
+            .getByRole("img", { name: "本机原图预览" })
+            .waitFor({ timeout: 5_000 });
+        }
+      },
+      async (profile) => {
+        const portrait = join(profile, "portrait.png");
+        const noFace = join(profile, "no-face.png");
+        const multiple = join(profile, "multiple.png");
+        await writeFile(
+          portrait,
+          Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAPAAAADwAQMAAAAEm3vRAAAABlBMVEWnX2QAAACveaDXAAAAHklEQVR42u3BAQ0AAADCoPdPbQ8HFAAAAAAAAMCnAR0QAAFQm+8DAAAAAElFTkSuQmCC",
+            "base64",
+          ),
+        );
+        await writeFile(
+          noFace,
+          Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAIAAAA2iEnWAAAAFElEQVR4nGOsULJgYGBgYmBgQFAAECoA2HBD9oMAAAAASUVORK5CYII=",
+            "base64",
+          ),
+        );
+        await writeFile(
+          multiple,
+          Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAFUlEQVR4nGNUqrBgYGBgYGBgYoABAA7qANbzEZPkAAAAAElFTkSuQmCC",
+            "base64",
+          ),
+        );
+        await writeFile(
+          join(profile, "face_landmarker.task"),
+          "test boundary only",
+        );
+        // This module replaces only the external model; the photo, UI and renderer are real.
+        await writeFile(
+          join(profile, "vision_bundle.mjs"),
+          `
+        export const FilesetResolver = { forVisionTasks: async () => ({}) };
+        export const FaceLandmarker = { createFromOptions: async (_, options) => ({
+          detect(image) {
+            if (options.numFaces !== 2) throw Error('multi-face detection must be enabled');
+            const face = [];
+            const loops = [
+              [[61,185,40,39,37,0,267,269,270,409,291,375,321,405,314,17,84,181,91,146], 30, 16],
+              [[78,191,80,81,82,13,312,311,310,415,308,324,318,402,317,14,87,178,88,95], 15, 5],
+            ];
+            for (const [ids, rx, ry] of loops) ids.forEach((id, i) => {
+              const angle = i / ids.length * Math.PI * 2 + Math.PI;
+              face[id] = {x: (120 + Math.cos(angle) * rx) / 240, y: (160 + Math.sin(angle) * ry) / 240};
+            });
+            return {faceLandmarks: image.width === 240 ? [face] : image.width === 2 ? [] : [face, face]};
+          },
+          close() {},
+        }) };
+      `,
+        );
+        return {
+          MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify([
+            portrait,
+            noFace,
+            multiple,
+          ]),
+          MAKEUPMIRROR_SMOKE_FACE_DIR: profile,
+          MAKEUPMIRROR_SMOKE_FACE_FIXTURE: "1",
+        };
+      },
+    ),
 );

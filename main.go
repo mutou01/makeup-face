@@ -17,12 +17,13 @@ func main() {
 		log.Fatal(err)
 	}
 	preview := &PhotoPreviewService{}
+	faceRoot, faceFixture := desktopFaceRuntime()
 	app := application.New(application.Options{
 		Name:        "MakeupMirror",
 		Description: "本机妆容工作台",
 		Assets: application.AssetOptions{
 			Handler:        application.BundledAssetFileServer(assets),
-			Middleware:     preview.assets,
+			Middleware:     application.ChainMiddleware(preview.assets, faceRuntimeAssets(faceRoot, faceFixture)),
 			DisableLogging: true,
 		},
 		Services: []application.Service{application.NewService(preview)},

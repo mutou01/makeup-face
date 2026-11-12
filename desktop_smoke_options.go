@@ -7,10 +7,19 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+func desktopFaceRuntime() (string, bool) {
+	root := os.Getenv("MAKEUPMIRROR_SMOKE_FACE_DIR")
+	if !filepath.IsAbs(root) {
+		return "", false
+	}
+	return root, os.Getenv("MAKEUPMIRROR_SMOKE_FACE_FIXTURE") == "1"
+}
 
 func desktopPhotoPicker(window application.Window) func() (string, error) {
 	raw := os.Getenv("MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS")

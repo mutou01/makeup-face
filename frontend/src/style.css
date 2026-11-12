@@ -54,23 +54,11 @@ ol {
   color: #654860;
 }
 
-.editor {
-  display: grid;
-  grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
-  gap: 1.25rem;
-  align-items: center;
-}
-
-.editor canvas {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: 0.75rem;
-}
-
 .controls {
   display: grid;
   gap: 1rem;
+  max-width: 22rem;
+  margin-top: 1rem;
   accent-color: #98395a;
 }
 
@@ -117,15 +105,4 @@ ol {
   max-height: 20rem;
   margin-top: 1rem;
   image-orientation: from-image;
-}
-
-@media (max-width: 480px) {
-  .editor {
-    grid-template-columns: 1fr;
-  }
-
-  .editor canvas {
-    max-width: 15rem;
-    margin: auto;
-  }
 }
