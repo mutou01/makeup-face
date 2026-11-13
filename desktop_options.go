@@ -21,6 +21,14 @@ func desktopProviderStore() *provider.Store {
 	return provider.NewStore(filepath.Join(directory, "MakeupMirror"), provider.WindowsVault{})
 }
 
+func desktopFaceStore() *provider.Store {
+	directory, err := os.UserCacheDir()
+	if err != nil {
+		return provider.NewFaceStore("", provider.WindowsVault{})
+	}
+	return provider.NewFaceStore(filepath.Join(directory, "MakeupMirror"), provider.WindowsVault{})
+}
+
 func desktopOptions() application.WindowsOptions {
 	return application.WindowsOptions{}
 }
@@ -38,9 +46,5 @@ func desktopExportPicker(window application.Window) func() (string, error) {
 }
 
 func desktopFaceRuntime() (string, bool) {
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		return "", false
-	}
-	return filepath.Join(cache, "MakeupMirror", "face-runtime", "v1"), false
+	return "", false
 }

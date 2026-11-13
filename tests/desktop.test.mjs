@@ -140,7 +140,7 @@ test(
           .getByRole("button", { name: "分析面部" })
           .click({ timeout: 5_000 });
         await page
-          .getByText("本机人脸模型尚未安装", { exact: false })
+          .getByText("请先配置云端人脸分析接口和密钥", { exact: false })
           .waitFor({ timeout: 5_000 });
         assert.equal(await assertImage(2, 3), first);
 
@@ -487,6 +487,137 @@ test(
           await mkdir(directory);
           return {
             MAKEUPMIRROR_SMOKE_PROJECT_DIRS: JSON.stringify([directory]),
+            MAKEUPMIRROR_SMOKE_PROVIDER_ADDR: `127.0.0.1:${server.address().port}`,
+          };
+        },
+      );
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  },
+);
+
+test(
+  "云端定位逐次确认，校验响应并生成本机试妆",
+  { timeout: 45_000 },
+  async () => {
+    const sent = [];
+    const server = createHTTPServer(async (req, res) => {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      sent.push({
+        path: req.url,
+        authorization: req.headers.authorization,
+        payload,
+      });
+      const fixture = makeFaceFixture({
+        width: payload.width,
+        height: payload.height,
+      });
+      const points = Array.from(
+        { length: 478 },
+        (_, i) => fixture.faceLandmarks[0]?.[i] ?? { x: 0.5, y: 0.5 },
+      );
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({
+          topology: "mediapipe-478-v1",
+          width: payload.width + (sent.length === 1 ? 1 : 0),
+          height: payload.height,
+          faces: [{ points, pose: fixture.facialTransformationMatrixes[0] }],
+        }),
+      );
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      await withDesktop(
+        async (page) => {
+          const settings = page.getByRole("region", {
+            name: "云端人脸分析设置",
+          });
+          await settings
+            .getByLabel("人脸网格 HTTPS 接口", { exact: true })
+            .fill("https://fixture.test/v1/face-mesh", { timeout: 5_000 });
+          await settings
+            .getByLabel("人脸分析密钥", { exact: true })
+            .fill("fixture-face-key");
+          await settings
+            .getByRole("button", { name: "保存分析设置" })
+            .click({ timeout: 5_000 });
+          await settings
+            .getByText("分析设置已保存。", { exact: true })
+            .waitFor({ timeout: 5_000 });
+          const select = page.getByRole("button", { name: "选择本机照片" });
+          await select.click({ timeout: 5_000 });
+          const original = page.getByRole("img", { name: "本机原图预览" });
+          await original.waitFor({ timeout: 5_000 });
+          const analyze = page.getByRole("button", {
+            name: "分析面部",
+            exact: true,
+          });
+          const dialog = page.getByRole("dialog", { name: "确认发送照片" });
+          await analyze.click({ timeout: 5_000 });
+          await dialog
+            .getByText("https://fixture.test/v1/face-mesh", { exact: false })
+            .waitFor({ timeout: 5_000 });
+          await dialog
+            .getByRole("button", { name: "取消" })
+            .click({ timeout: 5_000 });
+          assert.equal(sent.length, 0, "取消不上传");
+          await analyze.click({ timeout: 5_000 });
+          await dialog
+            .getByRole("button", { name: "发送照片并分析" })
+            .click({ timeout: 5_000 });
+          await page
+            .getByRole("status", { name: "照片处理状态" })
+            .filter({ hasText: "关键点响应不符合约定" })
+            .waitFor({ timeout: 5_000 });
+          await original.waitFor({ timeout: 5_000 });
+          assert.equal(sent.length, 1);
+          await analyze.click({ timeout: 5_000 });
+          assert.equal(sent.length, 1, "重试也必须先确认");
+          await dialog
+            .getByRole("button", { name: "发送照片并分析" })
+            .click({ timeout: 5_000 });
+          await page
+            .getByRole("img", { name: "试妆预览" })
+            .waitFor({ timeout: 5_000 });
+          assert.equal(sent.length, 2);
+          assert.equal(sent[1].path, "/v1/face-mesh");
+          assert.equal(sent[1].authorization, "Bearer fixture-face-key");
+          const payload = sent[1].payload;
+          assert.deepEqual(Object.keys(payload).sort(), [
+            "height",
+            "image",
+            "topology",
+            "width",
+          ]);
+          assert.equal(payload.topology, "mediapipe-478-v1");
+          const image = Buffer.from(payload.image, "base64");
+          assert.equal(image.readUInt32BE(16), 240);
+          assert.equal(image.readUInt32BE(20), 240);
+          assert.ok(
+            !image.includes("eXIf") && !image.includes("PRIVATE_TEST_TAG"),
+          );
+        },
+        async (profile) => {
+          const path = join(profile, "cloud-input.png");
+          await writeFile(
+            path,
+            fixturePNG(240, 240, detailRGB, [
+              [
+                "eXIf",
+                Buffer.from(
+                  "4d4d002a000000080002011200030000000100010000013b0002000000110000002600000000505249564154455f544553545f5441470000",
+                  "hex",
+                ),
+              ],
+            ]),
+          );
+          return {
+            MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify([path]),
             MAKEUPMIRROR_SMOKE_PROVIDER_ADDR: `127.0.0.1:${server.address().port}`,
           };
         },
@@ -1763,34 +1894,7 @@ async function makeupFixture(
         export const FaceLandmarker = { createFromOptions: async (_, options) => ({
           detect(image) {
             if (options.numFaces !== 2) throw Error('multi-face detection must be enabled');
-            const face = [];
-            const loops = [
-              [[61,185,40,39,37,0,267,269,270,409,291,375,321,405,314,17,84,181,91,146], 30, 16],
-              [[78,191,80,81,82,13,312,311,310,415,308,324,318,402,317,14,87,178,88,95], 15, 5],
-            ];
-            for (const [ids, rx, ry] of loops) ids.forEach((id, i) => {
-              const angle = i / ids.length * Math.PI * 2 + Math.PI;
-              face[id] = {x: (120 + Math.cos(angle) * rx) / 240, y: (160 + Math.sin(angle) * ry) / 240};
-            });
-            for (const [id, x, y] of [[33, 66, 95], [263, 174, 95], [205, 66, 133], [425, 174, 133], [234, 45, 133], [454, 195, 133]]) {
-              face[id] = {x: x / 240, y: y / 240};
-            }
-            for (const [upper, brow, start, direction] of [
-              [[33,246,161,160,159,158,157,173,133], [46,53,52,65,55], 66, 1],
-              [[263,466,388,387,386,385,384,398,362], [276,283,282,295,285], 174, -1],
-            ]) {
-              upper.forEach((id, i) => { face[id] = { x: (start + direction * 4 * i) / 240, y: (95 - 4 * Math.sin(Math.PI * i / 8)) / 240 }; });
-              brow.forEach((id, i) => { face[id] = { x: (start + direction * 8 * i) / 240, y: 81 / 240 }; });
-            }
-            if (image.height === 239) delete face[46]; // Only the eye layer is unavailable.
-            face[10] = { x: .5, y: .18 }; face[152] = { x: .5, y: .81 };
-            if (image.width === 241) for (const point of face) if (point) { point.x = .5 + (point.x - .5) * .4; point.y = .5 + (point.y - .5) * .4; }
-            if (image.width === 242) face[234].x = .009;
-            const yaw = image.width === 243 ? Math.PI / 4 : 0;
-            const pitch = image.width === 244 ? Math.PI / 5 : 0;
-            const c = Math.cos(yaw), s = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
-            const matrix = { rows: 4, columns: 4, data: [c,0,-s,0, s*sp,cp,c*sp,0, s*cp,-sp,c*cp,0, 0,0,0,1] };
-            return { faceLandmarks: image.width >= 240 ? [face] : image.width === 2 ? [] : [face, face], facialTransformationMatrixes: image.width === 245 ? [] : [matrix] };
+            return (${makeFaceFixture.toString()})(image);
           },
           close() {},
         }) };
@@ -1805,6 +1909,108 @@ async function makeupFixture(
     ),
     MAKEUPMIRROR_SMOKE_FACE_DIR: profile,
     MAKEUPMIRROR_SMOKE_FACE_FIXTURE: "1",
+  };
+}
+
+function makeFaceFixture(image) {
+  const face = [];
+  const loops = [
+    [
+      [
+        61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17,
+        84, 181, 91, 146,
+      ],
+      30,
+      16,
+    ],
+    [
+      [
+        78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317,
+        14, 87, 178, 88, 95,
+      ],
+      15,
+      5,
+    ],
+  ];
+  for (const [ids, rx, ry] of loops)
+    ids.forEach((id, i) => {
+      const angle = (i / ids.length) * Math.PI * 2 + Math.PI;
+      face[id] = {
+        x: (120 + Math.cos(angle) * rx) / 240,
+        y: (160 + Math.sin(angle) * ry) / 240,
+      };
+    });
+  for (const [id, x, y] of [
+    [33, 66, 95],
+    [263, 174, 95],
+    [205, 66, 133],
+    [425, 174, 133],
+    [234, 45, 133],
+    [454, 195, 133],
+  ]) {
+    face[id] = { x: x / 240, y: y / 240 };
+  }
+  for (const [upper, brow, start, direction] of [
+    [[33, 246, 161, 160, 159, 158, 157, 173, 133], [46, 53, 52, 65, 55], 66, 1],
+    [
+      [263, 466, 388, 387, 386, 385, 384, 398, 362],
+      [276, 283, 282, 295, 285],
+      174,
+      -1,
+    ],
+  ]) {
+    upper.forEach((id, i) => {
+      face[id] = {
+        x: (start + direction * 4 * i) / 240,
+        y: (95 - 4 * Math.sin((Math.PI * i) / 8)) / 240,
+      };
+    });
+    brow.forEach((id, i) => {
+      face[id] = { x: (start + direction * 8 * i) / 240, y: 81 / 240 };
+    });
+  }
+  if (image.height === 239) delete face[46]; // Only the eye layer is unavailable.
+  face[10] = { x: 0.5, y: 0.18 };
+  face[152] = { x: 0.5, y: 0.81 };
+  if (image.width === 241)
+    for (const point of face)
+      if (point) {
+        point.x = 0.5 + (point.x - 0.5) * 0.4;
+        point.y = 0.5 + (point.y - 0.5) * 0.4;
+      }
+  if (image.width === 242) face[234].x = 0.009;
+  const yaw = image.width === 243 ? Math.PI / 4 : 0;
+  const pitch = image.width === 244 ? Math.PI / 5 : 0;
+  const c = Math.cos(yaw),
+    s = Math.sin(yaw),
+    cp = Math.cos(pitch),
+    sp = Math.sin(pitch);
+  const matrix = {
+    rows: 4,
+    columns: 4,
+    data: [
+      c,
+      0,
+      -s,
+      0,
+      s * sp,
+      cp,
+      c * sp,
+      0,
+      s * cp,
+      -sp,
+      c * cp,
+      0,
+      0,
+      0,
+      0,
+      1,
+    ],
+  };
+  return {
+    faceLandmarks:
+      image.width >= 240 ? [face] : image.width === 2 ? [] : [face, face],
+    facialTransformationMatrixes: image.width === 245 ? [] : [matrix],
   };
 }
 

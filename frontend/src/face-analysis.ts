@@ -4,7 +4,7 @@ export type FacePose = {
   columns: number;
   data: ArrayLike<number>;
 };
-type DetectedFace = { points: Point[]; pose?: FacePose };
+export type DetectedFace = { points: Point[]; pose?: FacePose };
 type Landmarker = {
   detect: (frame: HTMLCanvasElement) => {
     faceLandmarks: Point[][];
