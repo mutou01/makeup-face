@@ -53,6 +53,9 @@ export function prepareMakeup(
   return {
     hasBlush: cheeks !== null,
     hasEyeshadow: lids !== null,
+    showOriginal() {
+      ctx.putImageData(original, 0, 0);
+    },
     paint(settings: Settings) {
       output.data.set(original.data);
       for (const kind of kinds) {

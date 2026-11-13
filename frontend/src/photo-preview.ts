@@ -177,6 +177,7 @@ export function mountPhotoPreview(section: HTMLElement) {
     <p id="photo-status" class="status" role="status" aria-label="照片处理状态"></p>
     <div id="photo-display"></div>
     <div id="makeup-editor" hidden>
+      <label class="toggle compare-toggle"><input id="show-original" type="checkbox" /> 查看原图</label>
       <canvas role="img" aria-label="试妆预览" class="photo-preview-image"></canvas>
       <div class="makeup-layers">
         ${layerMarkup("lipstick", "口红", "#ae344d", 65)}
@@ -208,6 +209,9 @@ export function mountPhotoPreview(section: HTMLElement) {
   const display = section.querySelector<HTMLElement>("#photo-display")!;
   const editor = section.querySelector<HTMLElement>("#makeup-editor")!;
   const canvas = editor.querySelector("canvas")!;
+  const showOriginal =
+    editor.querySelector<HTMLInputElement>("#show-original")!;
+  showOriginal.addEventListener("input", updatePreview);
   const lipstick = layerControls(editor, "lipstick", updatePreview);
   const blush = layerControls(editor, "blush", updatePreview);
   const eyeshadow = layerControls(editor, "eyeshadow", updatePreview);
@@ -229,6 +233,7 @@ export function mountPhotoPreview(section: HTMLElement) {
     pick.disabled = busy;
     clear.disabled = busy || !original;
     exportPreview.disabled = busy || !original;
+    showOriginal.disabled = busy;
     analyse.disabled = busy || !original || !!render;
     recommendations.setAvailable(!busy && render !== null);
     createProject.disabled = openProject.disabled = busy || projectActive;
@@ -241,6 +246,7 @@ export function mountPhotoPreview(section: HTMLElement) {
     original = image;
     render = null;
     restoreAnalysis = false;
+    showOriginal.checked = false;
     editor.hidden = true;
     canvas.width = canvas.height = 0;
     lipstick.reset();
@@ -252,6 +258,10 @@ export function mountPhotoPreview(section: HTMLElement) {
   }
 
   function updatePreview() {
+    if (showOriginal.checked) {
+      render?.showOriginal();
+      return;
+    }
     render?.paint({
       lipstick: lipstick.settings(),
       blush: blush.settings(),
@@ -372,6 +382,7 @@ export function mountPhotoPreview(section: HTMLElement) {
   exportPreview.addEventListener("click", async () => {
     if (!original) return;
     setBusy(true);
+    status.textContent = "正在导出预览…";
     try {
       const frame = render ? canvas : prepareFaceFrame(original);
       const encoded = frame.toDataURL("image/png").split(",", 2)[1];
