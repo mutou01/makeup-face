@@ -1,5 +1,6 @@
 import { detectFixtureFaces, prepareFaceFrame } from "./face-analysis";
 import { mountFaceProvider, requestFaceMesh, type Mesh } from "./face-provider";
+import { mountImageSettings } from "./image-preview";
 import { checkFraming, checkImageQuality } from "./face-quality";
 import {
   FULL_COVERAGE,
@@ -190,10 +191,12 @@ export function mountPhotoPreview(section: HTMLElement) {
     <section id="recommendations" class="recommendation-panel" aria-labelledby="recommendation-title"></section>
     <section id="provider-settings" class="recommendation-panel" aria-labelledby="provider-title"></section>
     <section id="face-provider" class="recommendation-panel" aria-labelledby="face-provider-title"></section>
+    <section id="image-provider" class="recommendation-panel" aria-labelledby="image-provider-title"></section>
   `;
   const faceProvider = mountFaceProvider(
     section.querySelector<HTMLElement>("#face-provider")!,
   );
+  mountImageSettings(section.querySelector<HTMLElement>("#image-provider")!);
   const pick = section.querySelector<HTMLButtonElement>("#pick-photo")!;
   const clear = section.querySelector<HTMLButtonElement>("#clear-photo")!;
   const exportPreview =

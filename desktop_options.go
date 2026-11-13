@@ -29,6 +29,14 @@ func desktopFaceStore() *provider.Store {
 	return provider.NewFaceStore(filepath.Join(directory, "MakeupMirror"), provider.WindowsVault{})
 }
 
+func desktopImageStore() *provider.Store {
+	directory, err := os.UserCacheDir()
+	if err != nil {
+		return provider.NewImageStore("", provider.WindowsVault{})
+	}
+	return provider.NewImageStore(filepath.Join(directory, "MakeupMirror"), provider.WindowsVault{})
+}
+
 func desktopOptions() application.WindowsOptions {
 	return application.WindowsOptions{}
 }

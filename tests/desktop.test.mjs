@@ -683,6 +683,68 @@ test(
   },
 );
 
+test(
+  "生图供应商独立保存 HTTPS 接口和模型，密钥不回填",
+  { timeout: 45_000 },
+  () =>
+    withDesktop(async (page, profile) => {
+      const panel = page.getByRole("region", { name: "生图供应商设置" });
+      const endpoint = panel.getByLabel("图片编辑 HTTPS 接口", { exact: true });
+      const model = panel.getByLabel("生图模型编号", { exact: true });
+      const key = panel.getByLabel("生图密钥", { exact: true });
+      const save = panel.getByRole("button", { name: "保存生图设置" });
+      const secret = `fixture-${randomUUID()}`;
+      await endpoint.fill("http://fixture.test/v1/images/edits", {
+        timeout: 5_000,
+      });
+      await model.fill("fixture-image-model");
+      await key.fill(secret);
+      await save.click();
+      await panel
+        .getByText("以 /images/edits 结尾的 HTTPS 接口", { exact: false })
+        .waitFor({ timeout: 5_000 });
+      const file = join(profile, "image-provider.json");
+      await assert.rejects(access(file), { code: "ENOENT" });
+
+      const url = "https://fixture.test/v1/images/edits";
+      await endpoint.fill(url);
+      await key.fill(secret);
+      await save.click();
+      await panel
+        .getByText("生图设置已保存。", { exact: true })
+        .waitFor({ timeout: 5_000 });
+      const disk = await readFile(file, "utf8");
+      assert.equal(JSON.parse(disk).endpoint, url);
+      assert.equal(JSON.parse(disk).model, "fixture-image-model");
+      assert.ok(!disk.includes(secret));
+      await page.reload();
+      await panel
+        .getByText("密钥已保存", { exact: true })
+        .waitFor({ timeout: 5_000 });
+      assert.equal(await key.inputValue(), "");
+      await endpoint.fill("https://other.test/v1/images/edits");
+      await save.click();
+      await panel
+        .getByText("更换接口须重新填写密钥", { exact: false })
+        .waitFor({ timeout: 5_000 });
+      assert.equal(await readFile(file, "utf8"), disk);
+      await panel.getByRole("button", { name: "清除生图密钥" }).click();
+      await panel
+        .getByText("已清除生图密钥。", { exact: true })
+        .waitFor({ timeout: 5_000 });
+      assert.equal(
+        JSON.parse(await readFile(file, "utf8")).credentialId,
+        undefined,
+      );
+      await assert.rejects(access(join(profile, "face-provider.json")), {
+        code: "ENOENT",
+      });
+      await assert.rejects(access(join(profile, "provider.json")), {
+        code: "ENOENT",
+      });
+    }),
+);
+
 async function pixels(canvas) {
   const result = await canvas.evaluate((element) => {
     const { width, height } = element;
