@@ -50,18 +50,31 @@ func ExportPNG(path, encoded string) error {
 
 // WritePNG stores already validated, re-encoded PNG bytes without overwriting.
 func WritePNG(path string, clean []byte) error {
+	err := writeExport(path, ".png", clean, errPNGName)
+	if errors.Is(err, os.ErrExist) {
+		return errExists
+	}
+	return err
+}
+
+// WriteDiagnostic saves the app's own diagnostic snapshot without overwriting.
+func WriteDiagnostic(path string, data []byte) error {
+	return writeExport(path, ".json", data, errors.New("请选择以 .json 结尾的本机文件。"))
+}
+
+func writeExport(path, extension string, data []byte, invalidName error) error {
 	name := filepath.Base(path)
-	if !filepath.IsAbs(path) || !strings.EqualFold(filepath.Ext(name), ".png") || strings.Contains(name, ":") {
-		return errPNGName
+	if !filepath.IsAbs(path) || !strings.EqualFold(filepath.Ext(name), extension) || strings.Contains(name, ":") {
+		return invalidName
 	}
 	root, err := openRoot(filepath.Dir(path))
 	if err != nil {
-		return errPNGName
+		return invalidName
 	}
 	defer root.Close()
-	if err := writeNew(root, name, clean); err != nil {
+	if err := writeNew(root, name, data); err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return errExists
+			return os.ErrExist
 		}
 		return errExport
 	}

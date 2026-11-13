@@ -53,6 +53,10 @@ func desktopExportPicker(window application.Window) func() (string, error) {
 	return nativeExportPicker(window)
 }
 
+func desktopDiagnosticPicker(window application.Window) func() (string, error) {
+	return nativeDiagnosticPicker(window)
+}
+
 func desktopFaceFixture() (application.Middleware, bool) {
 	return func(next http.Handler) http.Handler { return next }, false
 }
