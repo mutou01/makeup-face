@@ -20,6 +20,7 @@ func main() {
 	providerService := &ProviderService{store: desktopProviderStore(), client: desktopProviderClient()}
 	fixtureAssets, faceFixture := desktopFaceFixture()
 	faceService := &FaceService{store: desktopFaceStore(), client: desktopProviderClient(), preview: preview, fixture: faceFixture}
+	imageService := &ImageService{store: desktopImageStore(), client: desktopProviderClient(), preview: preview}
 	app := application.New(application.Options{
 		Name:        "MakeupMirror",
 		Description: "本机妆容工作台",
@@ -28,7 +29,7 @@ func main() {
 			Middleware:     application.ChainMiddleware(preview.assets, fixtureAssets),
 			DisableLogging: true,
 		},
-		Services: []application.Service{application.NewService(preview), application.NewService(providerService), application.NewService(faceService)},
+		Services: []application.Service{application.NewService(preview), application.NewService(providerService), application.NewService(faceService), application.NewService(imageService)},
 		Windows:  desktopOptions(),
 	})
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{

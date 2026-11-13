@@ -36,6 +36,10 @@ func desktopFaceStore() *provider.Store {
 	return provider.NewFaceStore(os.Getenv("MAKEUPMIRROR_SMOKE_PROFILE"), memoryVault{})
 }
 
+func desktopImageStore() *provider.Store {
+	return provider.NewImageStore(os.Getenv("MAKEUPMIRROR_SMOKE_PROFILE"), memoryVault{})
+}
+
 type fixtureTransport struct{ address string }
 
 func (transport fixtureTransport) RoundTrip(req *http.Request) (*http.Response, error) {

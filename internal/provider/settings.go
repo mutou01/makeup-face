@@ -76,6 +76,10 @@ func NewFaceStore(directory string, vault Vault) *Store {
 	return &Store{directory: directory, vault: vault, name: "face-provider.json", suffix: "/face-mesh"}
 }
 
+func NewImageStore(directory string, vault Vault) *Store {
+	return &Store{directory: directory, vault: vault, name: "image-provider.json", suffix: "/images/edits"}
+}
+
 func (s *Store) View() (View, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -169,6 +173,9 @@ func (c config) validate(suffix string) error {
 		if !validEndpoint(c.Endpoint, suffix) {
 			if suffix == "/face-mesh" {
 				return errors.New("请输入以 /face-mesh 结尾的 HTTPS 接口，不含凭据、查询参数或片段。")
+			}
+			if suffix == "/images/edits" {
+				return errors.New("请输入以 /images/edits 结尾的 HTTPS 接口，不含凭据、查询参数或片段。")
 			}
 			return errEndpoint
 		}

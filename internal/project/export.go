@@ -24,10 +24,6 @@ var (
 // ExportPNG re-encodes a bounded work canvas into a new file. Only a path
 // returned by the native save dialog should be passed here.
 func ExportPNG(path, encoded string) error {
-	name := filepath.Base(path)
-	if !filepath.IsAbs(path) || !strings.EqualFold(filepath.Ext(name), ".png") || strings.Contains(name, ":") {
-		return errPNGName
-	}
 	if len(encoded) > base64.StdEncoding.EncodedLen(maxPNGBytes) {
 		return errPNG
 	}
@@ -49,12 +45,21 @@ func ExportPNG(path, encoded string) error {
 	if err := png.Encode(&output, pixels); err != nil {
 		return errPNG
 	}
+	return WritePNG(path, output.Bytes())
+}
+
+// WritePNG stores already validated, re-encoded PNG bytes without overwriting.
+func WritePNG(path string, clean []byte) error {
+	name := filepath.Base(path)
+	if !filepath.IsAbs(path) || !strings.EqualFold(filepath.Ext(name), ".png") || strings.Contains(name, ":") {
+		return errPNGName
+	}
 	root, err := openRoot(filepath.Dir(path))
 	if err != nil {
 		return errPNGName
 	}
 	defer root.Close()
-	if err := writeNew(root, name, output.Bytes()); err != nil {
+	if err := writeNew(root, name, clean); err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return errExists
 		}

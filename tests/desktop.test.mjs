@@ -683,6 +683,249 @@ test(
   },
 );
 
+test(
+  "生图供应商独立保存 HTTPS 接口和模型，密钥不回填",
+  { timeout: 45_000 },
+  () =>
+    withDesktop(async (page, profile) => {
+      const panel = page.getByRole("region", { name: "生图供应商设置" });
+      const endpoint = panel.getByLabel("图片编辑 HTTPS 接口", { exact: true });
+      const model = panel.getByLabel("生图模型编号", { exact: true });
+      const key = panel.getByLabel("生图密钥", { exact: true });
+      const save = panel.getByRole("button", { name: "保存生图设置" });
+      const secret = `fixture-${randomUUID()}`;
+      await endpoint.fill("http://fixture.test/v1/images/edits", {
+        timeout: 5_000,
+      });
+      await model.fill("fixture-image-model");
+      await key.fill(secret);
+      await save.click();
+      await panel
+        .getByText("以 /images/edits 结尾的 HTTPS 接口", { exact: false })
+        .waitFor({ timeout: 5_000 });
+      const file = join(profile, "image-provider.json");
+      await assert.rejects(access(file), { code: "ENOENT" });
+
+      const url = "https://fixture.test/v1/images/edits";
+      await endpoint.fill(url);
+      await key.fill(secret);
+      await save.click();
+      await panel
+        .getByText("生图设置已保存。", { exact: true })
+        .waitFor({ timeout: 5_000 });
+      const disk = await readFile(file, "utf8");
+      assert.equal(JSON.parse(disk).endpoint, url);
+      assert.equal(JSON.parse(disk).model, "fixture-image-model");
+      assert.ok(!disk.includes(secret));
+      await page.reload();
+      await panel
+        .getByText("密钥已保存", { exact: true })
+        .waitFor({ timeout: 5_000 });
+      assert.equal(await key.inputValue(), "");
+      await endpoint.fill("https://other.test/v1/images/edits");
+      await save.click();
+      await panel
+        .getByText("更换接口须重新填写密钥", { exact: false })
+        .waitFor({ timeout: 5_000 });
+      assert.equal(await readFile(file, "utf8"), disk);
+      await panel.getByRole("button", { name: "清除生图密钥" }).click();
+      await panel
+        .getByText("已清除生图密钥。", { exact: true })
+        .waitFor({ timeout: 5_000 });
+      assert.equal(
+        JSON.parse(await readFile(file, "utf8")).credentialId,
+        undefined,
+      );
+      await assert.rejects(access(join(profile, "face-provider.json")), {
+        code: "ENOENT",
+      });
+      await assert.rejects(access(join(profile, "provider.json")), {
+        code: "ENOENT",
+      });
+    }),
+);
+
+test(
+  "生图逐次确认，拒绝无效结果并单独导出生成图",
+  { timeout: 60_000 },
+  async () => {
+    const generated = fixturePNG(1024, 1536, () => [26, 90, 139]);
+    const sent = [];
+    const server = createHTTPServer(async (req, res) => {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const form = await new Response(Buffer.concat(chunks), {
+        headers: { "Content-Type": req.headers["content-type"] },
+      }).formData();
+      const photo = form.get("image[]");
+      sent.push({
+        path: req.url,
+        authorization: req.headers.authorization,
+        fields: Object.fromEntries(
+          [...form].filter(([name]) => name !== "image[]"),
+        ),
+        image: Buffer.from(await photo.arrayBuffer()),
+        filename: photo.name,
+        mime: photo.type,
+      });
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({
+          data: [
+            sent.length === 1
+              ? { b64_json: generated.toString("base64") }
+              : { url: "https://fixture.test/untrusted.png" },
+          ],
+        }),
+      );
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      await withDesktop(
+        async (page, profile) => {
+          const setup = page.getByRole("region", { name: "生图供应商设置" });
+          await setup
+            .getByLabel("图片编辑 HTTPS 接口", { exact: true })
+            .fill("https://fixture.test/v1/images/edits");
+          await setup
+            .getByLabel("生图模型编号", { exact: true })
+            .fill("fixture-image-model");
+          await setup
+            .getByLabel("生图密钥", { exact: true })
+            .fill("fixture-image-secret");
+          await setup.getByRole("button", { name: "保存生图设置" }).click();
+          await setup
+            .getByText("生图设置已保存。", { exact: true })
+            .waitFor({ timeout: 5_000 });
+          const panel = page.getByRole("region", { name: "云端妆容参考图" });
+          const generate = panel.getByRole("button", {
+            name: "生成妆容参考图",
+          });
+          await generate.waitFor({ timeout: 5_000 });
+          assert.ok(await generate.isDisabled());
+          await page.getByRole("button", { name: "选择本机照片" }).click();
+          const original = page.getByRole("img", { name: "本机原图预览" });
+          const originalURL = await original.getAttribute("src", {
+            timeout: 5_000,
+          });
+          await panel
+            .getByLabel("生图妆容预设", { exact: true })
+            .selectOption({ label: "蜜桃暖妆" });
+          const consent = page.getByRole("dialog", {
+            name: "确认发送照片生图",
+          });
+          const send = consent.getByRole("button", { name: "发送照片并生成" });
+          await generate.click();
+          await consent
+            .getByText("https://fixture.test/v1/images/edits", { exact: false })
+            .waitFor({ timeout: 5_000 });
+          await consent
+            .getByText("蜜桃暖妆", { exact: false })
+            .waitFor({ timeout: 5_000 });
+          await consent.getByRole("button", { name: "取消" }).click();
+          assert.equal(sent.length, 0);
+          await generate.click();
+          await send.click();
+          const result = panel.getByRole("img", { name: "生图结果" });
+          await result.waitFor({ timeout: 10_000 });
+          assert.equal(sent.length, 1);
+          const request = sent[0];
+          assert.equal(request.path, "/v1/images/edits");
+          assert.equal(request.authorization, "Bearer fixture-image-secret");
+          assert.equal(request.filename, "reference.png");
+          assert.equal(request.mime, "image/png");
+          assert.equal(request.fields.model, "fixture-image-model");
+          assert.match(request.fields.prompt, /蜜桃暖妆/);
+          assert.deepEqual(Object.keys(request.fields).sort(), [
+            "model",
+            "n",
+            "output_format",
+            "prompt",
+            "size",
+          ]);
+          assert.equal(request.image.readUInt32BE(16), 768);
+          assert.equal(request.image.readUInt32BE(20), 1024);
+          assert.ok(
+            !request.image.includes("eXIf") &&
+              !request.image.includes("PRIVATE_TEST_TAG"),
+          );
+          const outputURL = await result.getAttribute("src");
+          assert.match(outputURL, /^\/local-image-preview\//);
+          assert.equal(
+            await panel
+              .getByRole("img", { name: "生图对比原图" })
+              .getAttribute("src"),
+            originalURL,
+          );
+          assert.equal(await original.getAttribute("src"), originalURL);
+          assert.equal(await result.evaluate((img) => img.naturalHeight), 1536);
+
+          await generate.click();
+          assert.equal(sent.length, 1);
+          await send.click();
+          await panel
+            .getByText("供应商未返回有效的 PNG", { exact: false })
+            .waitFor({ timeout: 5_000 });
+          assert.equal(sent.length, 2, "供应商给出的外链不能被请求");
+          assert.equal(await result.getAttribute("src"), outputURL);
+          await panel.getByRole("button", { name: "导出生图 PNG" }).click();
+          await panel
+            .getByText("生图已导出。", { exact: true })
+            .waitFor({ timeout: 5_000 });
+          const exported = await readFile(join(profile, "generated.png"));
+          assert.equal(exported.readUInt32BE(16), 1024);
+          assert.equal(exported.readUInt32BE(20), 1536);
+          const colour = await page.evaluate(
+            async (bytes) => {
+              const png = await createImageBitmap(
+                new Blob([Uint8Array.from(bytes)], { type: "image/png" }),
+              );
+              const canvas = document.createElement("canvas");
+              canvas.width = canvas.height = 1;
+              const ctx = canvas.getContext("2d");
+              ctx.drawImage(png, 0, 0, 1, 1);
+              png.close();
+              return [...ctx.getImageData(0, 0, 1, 1).data];
+            },
+            [...exported],
+          );
+          assert.deepEqual(colour, [26, 90, 139, 255]);
+          await page.getByRole("button", { name: "清除预览" }).click();
+          await result.waitFor({ state: "hidden", timeout: 5_000 });
+          assert.equal(
+            await page.evaluate(
+              async (url) => (await fetch(url)).status,
+              outputURL,
+            ),
+            404,
+          );
+        },
+        async (profile) => {
+          const photo = join(profile, "original.png");
+          const metadata = Buffer.from(
+            "4d4d002a000000080002011200030000000100010000013b0002000000110000002600000000505249564154455f544553545f5441470000",
+            "hex",
+          );
+          await writeFile(
+            photo,
+            fixturePNG(900, 1200, () => [125, 80, 65], [["eXIf", metadata]]),
+          );
+          return {
+            MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify([photo]),
+            MAKEUPMIRROR_SMOKE_PROVIDER_ADDR: `127.0.0.1:${server.address().port}`,
+            MAKEUPMIRROR_SMOKE_EXPORT_PATHS: JSON.stringify([
+              join(profile, "generated.png"),
+            ]),
+          };
+        },
+      );
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  },
+);
+
 async function pixels(canvas) {
   const result = await canvas.evaluate((element) => {
     const { width, height } = element;

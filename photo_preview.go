@@ -34,6 +34,7 @@ type PhotoPreviewService struct {
 	busy        atomic.Bool
 	mu          sync.RWMutex
 	current     previewAsset
+	generated   previewAsset
 }
 
 type projectResult struct {
@@ -186,6 +187,7 @@ func (s *PhotoPreviewService) CloseProject() bool {
 func (s *PhotoPreviewService) setAsset(asset previewAsset) {
 	s.mu.Lock()
 	s.current = asset
+	s.generated = previewAsset{}
 	s.mu.Unlock()
 }
 
@@ -249,6 +251,11 @@ func (s *PhotoPreviewService) Clear() bool {
 func (s *PhotoPreviewService) assets(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id, matched := strings.CutPrefix(r.URL.Path, photoPreviewPrefix)
+		generated := false
+		if !matched {
+			id, generated = strings.CutPrefix(r.URL.Path, generatedPreviewPrefix)
+			matched = generated
+		}
 		if !matched {
 			next.ServeHTTP(w, r)
 			return
@@ -261,6 +268,9 @@ func (s *PhotoPreviewService) assets(next http.Handler) http.Handler {
 		}
 		s.mu.RLock()
 		asset := s.current
+		if generated {
+			asset = s.generated
+		}
 		s.mu.RUnlock()
 		if id == "" || id != asset.id {
 			http.NotFound(w, r)

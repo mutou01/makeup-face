@@ -87,3 +87,7 @@ export function recommend(scene: string, look: string) {
     })
     .sort((a, b) => b.score - a.score || a.index - b.index);
 }
+
+export function imagePresets() {
+  return presets.map(({ id, name }) => ({ id, name }));
+}
