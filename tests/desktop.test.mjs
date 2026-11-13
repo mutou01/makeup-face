@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   access,
   mkdir,
@@ -743,6 +743,97 @@ test(
         code: "ENOENT",
       });
     }),
+);
+
+test("Codex 生图沿用逐次确认、原图对比和导出", { timeout: 45_000 }, () =>
+  withDesktop(
+    async (page, profile) => {
+      await page.getByRole("button", { name: "选择本机照片" }).click();
+      const original = page.getByRole("img", { name: "本机原图预览" });
+      await original.waitFor({ timeout: 5_000 });
+      const panel = page.getByRole("region", { name: "云端妆容参考图" });
+      const supplier = panel.getByLabel("本次生图供应商");
+      await supplier.selectOption("codex", { timeout: 3_000 });
+      const generate = panel.getByRole("button", { name: "生成妆容参考图" });
+      const dialog = page.getByRole("dialog", { name: "确认发送照片生图" });
+      await generate.click();
+      await dialog
+        .getByText("OpenAI（Codex 当前登录的 ChatGPT 账号）", {
+          exact: false,
+        })
+        .waitFor({ timeout: 5_000 });
+      await dialog.getByRole("button", { name: "取消" }).click();
+      const receipt = join(profile, "codex-receipt.json");
+      await assert.rejects(access(receipt), { code: "ENOENT" });
+
+      await generate.click();
+      await dialog.getByRole("button", { name: "发送照片并生成" }).click();
+      const result = panel.getByRole("img", { name: "生图结果" });
+      await result.waitFor({ timeout: 8_000 });
+      const outputURL = await result.getAttribute("src");
+      const received = JSON.parse(await readFile(receipt, "utf8"));
+      assert.deepEqual(received.dimensions, [768, 1024]);
+      assert.equal(received.hasPrivateMetadata, false);
+      assert.equal(received.inputCount, 2);
+      assert.match(received.prompt, /日常豆沙/);
+      assert.equal(
+        await panel
+          .getByRole("img", { name: "生图对比原图" })
+          .getAttribute("src"),
+        await original.getAttribute("src"),
+      );
+
+      for (const [mode, message] of [
+        ["wrong-image", "未确认使用本次照片"],
+        ["signed-out", "请先在 Codex 中使用 ChatGPT 登录"],
+      ]) {
+        await writeFile(join(profile, "codex-mode"), mode);
+        await generate.click();
+        await dialog.getByRole("button", { name: "发送照片并生成" }).click();
+        await panel
+          .getByText(message, { exact: false })
+          .waitFor({ timeout: 5_000 });
+        assert.equal(await result.getAttribute("src"), outputURL);
+      }
+      await panel.getByRole("button", { name: "导出生图 PNG" }).click();
+      await panel
+        .getByText("生图已导出。", { exact: true })
+        .waitFor({ timeout: 5_000 });
+      const exported = await readFile(join(profile, "codex-export.png"));
+      const displayed = await page.evaluate(async (url) => {
+        const image = await fetch(url);
+        return Array.from(new Uint8Array(await image.arrayBuffer()));
+      }, outputURL);
+      assert.equal(
+        createHash("sha256").update(exported).digest("hex"),
+        createHash("sha256").update(Buffer.from(displayed)).digest("hex"),
+      );
+    },
+    async (profile) => {
+      const photo = join(profile, "codex-original.png");
+      const output = join(profile, "codex-result.png");
+      await writeFile(
+        photo,
+        fixturePNG(900, 1200, () => [125, 80, 65], [
+          ["eXIf", Buffer.from("PRIVATE_CODEX_TAG")],
+        ]),
+      );
+      await writeFile(
+        output,
+        fixturePNG(12, 16, () => [25, 70, 120]),
+      );
+      return {
+        MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify([photo]),
+        MAKEUPMIRROR_SMOKE_EXPORT_PATHS: JSON.stringify([
+          join(profile, "codex-export.png"),
+        ]),
+        MAKEUPMIRROR_SMOKE_CODEX_NODE: process.execPath,
+        MAKEUPMIRROR_SMOKE_CODEX_SCRIPT: fileURLToPath(
+          new URL("./fixtures/codex-app-server.mjs", import.meta.url),
+        ),
+      };
+    },
+  ),
 );
 
 test(

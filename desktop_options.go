@@ -13,6 +13,8 @@ import (
 
 func desktopProviderClient() *http.Client { return provider.NewHTTPClient() }
 
+func desktopCodexImage() provider.CodexImage { return provider.CodexImage{} }
+
 func desktopProviderStore() *provider.Store {
 	directory, err := os.UserCacheDir()
 	if err != nil {
