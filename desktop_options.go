@@ -12,6 +12,7 @@ import (
 )
 
 func desktopProviderClient() *http.Client { return provider.NewHTTPClient() }
+func desktopImageClient() *http.Client    { return provider.NewImageHTTPClient() }
 
 func desktopCodexImage() provider.CodexImage { return provider.CodexImage{} }
 

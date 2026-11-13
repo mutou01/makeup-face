@@ -21,7 +21,7 @@ func main() {
 	preview := &PhotoPreviewService{diagnostics: diagnosticSession}
 	diagnosticsService := &DiagnosticsService{session: diagnosticSession}
 	providerService := &ProviderService{store: desktopProviderStore(), client: desktopProviderClient()}
-	imageService := &ImageService{store: desktopImageStore(), client: desktopProviderClient(), preview: preview, codex: desktopCodexImage()}
+	imageService := &ImageService{store: desktopImageStore(), client: desktopImageClient(), preview: preview, codex: desktopCodexImage()}
 	app := application.New(application.Options{
 		Name:        "MakeupMirror",
 		Description: "本机妆容工作台",

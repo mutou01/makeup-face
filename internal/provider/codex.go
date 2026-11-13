@@ -16,7 +16,9 @@ import (
 )
 
 var (
-	errCodexMissing = errors.New("找不到可用的 Codex 命令行，请安装或更新 Codex 并确认 codex.exe 在 PATH 中。")
+	errCodexMissing = errors.New("找不到可用的 Codex 命令行，请确认 codex.exe 或官方 npm 版 Codex 已安装。")
+	errCodexStart   = errors.New("已找到 Codex，但无法启动服务。请在终端运行 codex app-server --help 检查安装。")
+	errCodexSetup   = errors.New("已找到 Codex，但无法读取其工具配置。请在终端检查 codex mcp list。")
 	errCodexLogin   = errors.New("请先在 Codex 中使用 ChatGPT 登录，再重新确认发送。")
 	errCodexInput   = errors.New("Codex 未确认使用本次照片，已保留上一次生成结果。")
 	codexServerName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -55,6 +57,12 @@ func (c CodexImage) Edit(ctx context.Context, preset, encoded string) ([]byte, e
 	}
 	cmd, err := command(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, errors.New("本次 Codex 生图已取消或超时。")
+		}
+		if errors.Is(err, errCodexSetup) {
+			return nil, errCodexSetup
+		}
 		return nil, errCodexMissing
 	}
 	cmd.Dir = dir
@@ -66,7 +74,7 @@ func (c CodexImage) Edit(ctx context.Context, preset, encoded string) ([]byte, e
 }
 
 func codexCommand(ctx context.Context, dir string) (*exec.Cmd, error) {
-	path, err := exec.LookPath("codex.exe")
+	path, err := findCodexExecutable()
 	if err != nil {
 		return nil, err
 	}
@@ -75,13 +83,13 @@ func codexCommand(ctx context.Context, dir string) (*exec.Cmd, error) {
 	list.Dir = dir
 	raw, err := list.Output()
 	if err != nil {
-		return nil, err
+		return nil, errCodexSetup
 	}
 	var servers []struct {
 		Name string `json:"name"`
 	}
 	if err := json.Unmarshal(raw, &servers); err != nil {
-		return nil, err
+		return nil, errCodexSetup
 	}
 	args := []string{
 		"app-server", "--listen", "stdio://",
@@ -103,11 +111,13 @@ func codexCommand(ctx context.Context, dir string) (*exec.Cmd, error) {
 	}
 	for _, server := range servers {
 		if !codexServerName.MatchString(server.Name) {
-			return nil, errCodexMissing
+			return nil, errCodexSetup
 		}
 		args = append(args, "-c", "mcp_servers."+server.Name+".enabled=false")
 	}
 	cmd := exec.CommandContext(ctx, path, args...)
+	proxy, bypass := systemImageProxy()
+	cmd.Env = codexProxyEnvironment(os.Environ(), proxy, bypass)
 	hideCodexWindow(cmd)
 	return cmd, nil
 }
@@ -182,7 +192,7 @@ func codexTurn(cmd *exec.Cmd, photo, prompt string, digest [32]byte) ([]byte, er
 	}
 	defer out.Close()
 	if cmd.Start() != nil {
-		return nil, errCodexMissing
+		return nil, errCodexStart
 	}
 	defer func() {
 		_ = in.Close()
