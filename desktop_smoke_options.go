@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 
@@ -55,6 +57,16 @@ func (transport fixtureTransport) RoundTrip(req *http.Request) (*http.Response, 
 
 func desktopProviderClient() *http.Client {
 	return &http.Client{Transport: fixtureTransport{address: os.Getenv("MAKEUPMIRROR_SMOKE_PROVIDER_ADDR")}}
+}
+
+func desktopCodexImage() provider.CodexImage {
+	return provider.CodexImage{Command: func(ctx context.Context) (*exec.Cmd, error) {
+		node, script := os.Getenv("MAKEUPMIRROR_SMOKE_CODEX_NODE"), os.Getenv("MAKEUPMIRROR_SMOKE_CODEX_SCRIPT")
+		if !filepath.IsAbs(node) || !filepath.IsAbs(script) {
+			return nil, errors.New("桌面验收未配置 Codex 模拟进程")
+		}
+		return exec.CommandContext(ctx, node, script, os.Getenv("MAKEUPMIRROR_SMOKE_PROFILE")), nil
+	}}
 }
 
 func desktopFaceFixture() (application.Middleware, bool) {

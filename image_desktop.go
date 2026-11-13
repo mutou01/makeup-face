@@ -16,6 +16,7 @@ type ImageService struct {
 	store   *provider.Store
 	client  *http.Client
 	preview *PhotoPreviewService
+	codex   provider.CodexImage
 }
 
 func (s *ImageService) GetSettings() (provider.View, error) {
@@ -31,6 +32,18 @@ func (s *ImageService) ForgetKey() (provider.View, error) {
 }
 
 func (s *ImageService) Generate(ctx context.Context, photoURL, endpoint, model, preset, frame string) (string, error) {
+	return s.generate(ctx, photoURL, func() ([]byte, error) {
+		return s.store.EditImage(ctx, s.client, endpoint, model, preset, frame)
+	})
+}
+
+func (s *ImageService) GenerateCodex(ctx context.Context, photoURL, preset, frame string) (string, error) {
+	return s.generate(ctx, photoURL, func() ([]byte, error) {
+		return s.codex.Edit(ctx, preset, frame)
+	})
+}
+
+func (s *ImageService) generate(ctx context.Context, photoURL string, edit func() ([]byte, error)) (string, error) {
 	if !s.preview.busy.CompareAndSwap(false, true) {
 		return "", errors.New("正在处理照片，请稍候。")
 	}
@@ -41,7 +54,7 @@ func (s *ImageService) Generate(ctx context.Context, photoURL, endpoint, model, 
 	if id == "" || photoURL != photoPreviewPrefix+id {
 		return "", errors.New("当前照片已变化，请重新确认发送。")
 	}
-	data, err := s.store.EditImage(ctx, s.client, endpoint, model, preset, frame)
+	data, err := edit()
 	if err != nil {
 		return "", err
 	}

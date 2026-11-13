@@ -45,7 +45,7 @@ flowchart LR
 
 [可选 AI 解释](subsystems/ai-explanation.md)默认关闭，只在用户主动点击时由 Go 请求单一 HTTPS 供应商。解释与排序、照片和渲染分开；网络失败回到本地理由。
 
-[云端生图](subsystems/image-preview.md)是独立的图片编辑请求。每次确认后发送缩放照片和预设描述，生成 PNG 供参考及单独导出，不改变本机照片、关键点或妆容图层。
+[云端生图](subsystems/image-preview.md)是独立的图片编辑请求。每次确认后通过已配置的 HTTPS 接口或本机 Codex App Server 发送缩放照片和预设描述，生成 PNG 供参考及单独导出，不改变本机照片、关键点或妆容图层。Codex 管理自身账号；MakeupMirror 不接触登录令牌。
 
 ## 选型与退出条件
 

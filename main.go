@@ -23,7 +23,7 @@ func main() {
 	providerService := &ProviderService{store: desktopProviderStore(), client: desktopProviderClient()}
 	fixtureAssets, faceFixture := desktopFaceFixture()
 	faceService := &FaceService{store: desktopFaceStore(), client: desktopProviderClient(), preview: preview, fixture: faceFixture}
-	imageService := &ImageService{store: desktopImageStore(), client: desktopProviderClient(), preview: preview}
+	imageService := &ImageService{store: desktopImageStore(), client: desktopProviderClient(), preview: preview, codex: desktopCodexImage()}
 	app := application.New(application.Options{
 		Name:        "MakeupMirror",
 		Description: "本机妆容工作台",

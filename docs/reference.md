@@ -18,7 +18,7 @@
 
 如需补充解释，在「AI 解释设置」填写支持聊天补全的 HTTPS 接口、模型编号和密钥，勾选启用后保存。推荐卡片会显示发送范围；点击「生成」才联系供应商。失败时仍可查看本地理由。详见[AI 解释说明](subsystems/ai-explanation.md)。
 
-要生成整图参考，请先配置「生图供应商设置」。选图后在「云端妆容参考图」选预设，核对目标后确认发送。生成图可与原图并列对比，或点击「导出生图 PNG」单独保存。生成结果不会替换本机试妆。详见[生图说明](subsystems/image-preview.md)。
+要生成整图参考，可配置「生图供应商设置」中的 HTTPS 接口，或在「本次生图供应商」选择 Codex，使用本机已登录的 ChatGPT 账号。选图后在「云端妆容参考图」选预设，核对目标后逐次确认发送。生成图可与原图并列对比，或点击「导出生图 PNG」单独保存。生成结果不会替换本机试妆。详见[生图说明](subsystems/image-preview.md)。
 
 应用缺少 WebView2 时，按 [Microsoft 指引](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution)安装运行时。验收需要能够启动桌面应用的 Windows 会话，使用 `npm run verify`。测试程序、正式构建和本机资源的区别见[桌面启动说明](subsystems/desktop.md)。
 

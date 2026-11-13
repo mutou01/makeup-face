@@ -10,7 +10,12 @@ type ImageSettings = {
 };
 
 type Method =
-  "GetSettings" | "SaveSettings" | "ForgetKey" | "Generate" | "ExportGenerated";
+  | "GetSettings"
+  | "SaveSettings"
+  | "ForgetKey"
+  | "Generate"
+  | "GenerateCodex"
+  | "ExportGenerated";
 
 async function call<T>(method: Method, ...args: unknown[]): Promise<T> {
   const url = "/wails/runtime.js";
@@ -97,6 +102,11 @@ export function mountImagePreview(
     <h2 id="generated-title">云端妆容参考图</h2>
     <p>用所选照片和预设生成整图，供对照参考，不替换本机试妆。</p>
     <div class="photo-actions">
+      <label for="image-supplier">本次生图供应商</label>
+      <select id="image-supplier">
+        <option value="https">已配置的 HTTPS 供应商</option>
+        <option value="codex">Codex（使用 ChatGPT 登录）</option>
+      </select>
       <label for="image-preset">生图妆容预设</label>
       <select id="image-preset"></select>
       <button type="button" id="generate-image" disabled>生成妆容参考图</button>
@@ -113,13 +123,15 @@ export function mountImagePreview(
       <h2 id="image-consent-title">确认发送照片生图</h2>
       <p id="image-consent-destination"></p>
       <p>只发送当前照片的缩放副本和所选预设的妆容描述，不发送原文件名、拍摄元数据、关键点或项目内容。仅授权本次发送。</p>
+      <p id="codex-consent-note" hidden>本机 Codex 可能保留生成图，使用当前 ChatGPT 账号的用量。</p>
       <div class="photo-actions">
         <button type="button" id="cancel-image" autofocus>取消</button>
         <button type="button" id="confirm-image">发送照片并生成</button>
       </div>
     </dialog>
   `;
-  const preset = panel.querySelector("select")!;
+  const preset = panel.querySelector<HTMLSelectElement>("#image-preset")!;
+  const supplier = panel.querySelector<HTMLSelectElement>("#image-supplier")!;
   for (const { id, name } of imagePresets()) preset.add(new Option(name, id));
   const generate = panel.querySelector<HTMLButtonElement>("#generate-image")!;
   const exportButton =
@@ -130,17 +142,22 @@ export function mountImagePreview(
   const caption = panel.querySelector("#generated-caption")!;
   const dialog = panel.querySelector("dialog")!;
   const destination = panel.querySelector("#image-consent-destination")!;
+  const codexNote = panel.querySelector<HTMLElement>("#codex-consent-note")!;
   let source: HTMLImageElement | undefined;
   let busy = false;
 
   function updateButtons() {
     generate.disabled = busy || !source;
     preset.disabled = busy || !source;
+    supplier.disabled = busy;
     exportButton.disabled = busy || comparison.hasAttribute("hidden");
   }
 
-  function confirm(view: ImageSettings, name: string) {
-    destination.textContent = `发送至 ${view.endpoint}，使用 ${view.model} 生成「${name}」。`;
+  function confirm(view: ImageSettings | undefined, name: string) {
+    destination.textContent = view
+      ? `发送至 ${view.endpoint}，使用 ${view.model} 生成「${name}」。`
+      : `发送至 OpenAI（Codex 当前登录的 ChatGPT 账号），生成「${name}」。`;
+    codexNote.hidden = !!view;
     dialog.returnValue = "";
     return new Promise<boolean>((resolve) => {
       dialog.addEventListener(
@@ -166,8 +183,11 @@ export function mountImagePreview(
     const name = preset.selectedOptions[0].text;
     setWorkbenchBusy(true);
     try {
-      const view = await call<ImageSettings>("GetSettings");
-      if (!view.enabled) {
+      const view =
+        supplier.value === "codex"
+          ? undefined
+          : await call<ImageSettings>("GetSettings");
+      if (view && !view.enabled) {
         status.textContent = "请先保存生图供应商设置。";
         return;
       }
@@ -176,14 +196,17 @@ export function mountImagePreview(
       const data = prepareFaceFrame(selected)
         .toDataURL("image/png")
         .split(",", 2)[1];
-      const result = await call<string>(
-        "Generate",
-        new URL(selected.src).pathname,
-        view.endpoint,
-        view.model,
-        id,
-        data,
-      );
+      const photoURL = new URL(selected.src).pathname;
+      const result = view
+        ? await call<string>(
+            "Generate",
+            photoURL,
+            view.endpoint,
+            view.model,
+            id,
+            data,
+          )
+        : await call<string>("GenerateCodex", photoURL, id, data);
       generatedImage.setAttribute("src", result);
       originalImage.setAttribute("src", selected.getAttribute("src")!);
       caption.textContent = `生成参考图：${name}`;
