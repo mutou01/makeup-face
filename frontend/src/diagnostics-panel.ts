@@ -1,5 +1,5 @@
 const operations: Readonly<Record<string, string>> = {
-  face_analysis: "云端人脸定位",
+  face_analysis: "本机人脸定位",
   project_create: "新建项目",
   project_open: "打开项目",
   project_save: "保存项目",

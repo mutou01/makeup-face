@@ -1,5 +1,4 @@
-import { detectFixtureFaces, prepareFaceFrame } from "./face-analysis";
-import { mountFaceProvider, requestFaceMesh, type Mesh } from "./face-provider";
+import { detectLocalFaces, prepareFaceFrame, type Mesh } from "./face-analysis";
 import { mountImagePreview, mountImageSettings } from "./image-preview";
 import { checkFraming, checkImageQuality } from "./face-quality";
 import {
@@ -41,6 +40,7 @@ type Operation =
   | "OpenProject"
   | "SaveProject"
   | "CloseProject"
+  | "RecordFaceAnalysis"
   | "RemoveProjectPhoto"
   | "ExportPreview";
 
@@ -157,7 +157,7 @@ function layerControls(editor: HTMLElement, id: string, onInput: () => void) {
 export function mountPhotoPreview(section: HTMLElement) {
   section.innerHTML = `
     <h2 id="photo-preview-title">本机照片</h2>
-    <p class="sample-note">支持 JPEG、PNG、WebP。照片只在本机处理。</p>
+    <p class="sample-note">支持 JPEG、PNG、WebP。面部定位和试妆在本机完成。</p>
     <section class="recommendation-panel" aria-labelledby="project-title">
       <h2 id="project-title">本机项目</h2>
       <div class="photo-actions">
@@ -191,12 +191,8 @@ export function mountPhotoPreview(section: HTMLElement) {
     <section id="recommendations" class="recommendation-panel" aria-labelledby="recommendation-title"></section>
     <section id="generated-preview" class="recommendation-panel" aria-labelledby="generated-title"></section>
     <section id="provider-settings" class="recommendation-panel" aria-labelledby="provider-title"></section>
-    <section id="face-provider" class="recommendation-panel" aria-labelledby="face-provider-title"></section>
     <section id="image-provider" class="recommendation-panel" aria-labelledby="image-provider-title"></section>
   `;
-  const faceProvider = mountFaceProvider(
-    section.querySelector<HTMLElement>("#face-provider")!,
-  );
   mountImageSettings(section.querySelector<HTMLElement>("#image-provider")!);
   const pick = section.querySelector<HTMLButtonElement>("#pick-photo")!;
   const clear = section.querySelector<HTMLButtonElement>("#clear-photo")!;
@@ -300,6 +296,12 @@ export function mountPhotoPreview(section: HTMLElement) {
 
   async function analysePhoto(savedMesh?: Mesh) {
     if (!original) return;
+    const photoURL = new URL(original.src).pathname;
+    const started = performance.now();
+    let recorded = false;
+    let reason = "unavailable";
+    const unavailable =
+      "本机人脸模型不可用，请检查应用的定位资源。可继续查看原图。";
     try {
       const frame = prepareFaceFrame(original);
       let faces;
@@ -312,25 +314,17 @@ export function mountPhotoPreview(section: HTMLElement) {
           return;
         }
         faces = savedMesh.faces;
-      } else if (faceProvider.isFixture()) {
-        faces = await detectFixtureFaces(frame);
       } else {
-        const endpoint = await faceProvider.confirm();
-        if (!endpoint) return;
-        status.textContent = "正在等待云端人脸分析…";
-        faces = (
-          await requestFaceMesh(
-            original.src.slice(location.origin.length),
-            endpoint,
-            frame,
-          )
-        ).faces;
+        status.textContent = "正在本机分析面部…";
+        faces = await detectLocalFaces(frame);
       }
       if (faces === null) {
-        status.textContent = "本机人脸模型尚未安装或校验失败，可继续查看原图。";
+        status.textContent = unavailable;
       } else if (faces.length === 0) {
+        reason = "no_face";
         status.textContent = "没有检测到人脸，请换一张清晰的正面照。";
       } else if (faces.length > 1) {
+        reason = "multiple_faces";
         status.textContent = "检测到多张人脸，请换一张单人正面照。";
       } else {
         const { points, pose } = faces[0];
@@ -344,11 +338,34 @@ export function mountPhotoPreview(section: HTMLElement) {
           status.textContent = imageQuality;
           return;
         }
-        render = prepareMakeup(canvas, frame, points);
-        if (!render) {
+        const candidate = prepareMakeup(canvas, frame, points);
+        if (!candidate) {
           status.textContent = "唇部轮廓不完整，请换一张清晰的正面照。";
           return;
         }
+        if (!savedMesh && pose) {
+          const result: Mesh = {
+            topology: "mediapipe-478-v1",
+            width: frame.width,
+            height: frame.height,
+            faces: [
+              {
+                points,
+                pose: {
+                  rows: pose.rows,
+                  columns: pose.columns,
+                  data: Array.from(pose.data),
+                },
+              },
+            ],
+          };
+          recorded = true;
+          if (!(await recordAnalysis(result))) {
+            status.textContent = "本机关键点未通过校验，可继续查看原图。";
+            return;
+          }
+        }
+        render = candidate;
         restoreAnalysis = true;
         blush.fieldset.hidden = !render.hasBlush;
         eyeshadow.fieldset.hidden = !render.hasEyeshadow;
@@ -363,11 +380,20 @@ export function mountPhotoPreview(section: HTMLElement) {
             ? `已定位，可启用${ready.join("、")}。`
             : `部分区域定位不完整，可启用${ready.join("、")}。`;
       }
-    } catch (error) {
-      status.textContent =
-        error instanceof Error
-          ? error.message
-          : "人脸分析未能完成，可继续查看原图。";
+    } catch {
+      status.textContent = unavailable;
+    } finally {
+      if (!savedMesh && !recorded) await recordAnalysis(null);
+    }
+
+    function recordAnalysis(result: Mesh | null) {
+      return call<boolean>(
+        "RecordFaceAnalysis",
+        photoURL,
+        result,
+        reason,
+        Math.round(performance.now() - started),
+      ).catch(() => false);
     }
   }
 
@@ -475,8 +501,6 @@ export function mountPhotoPreview(section: HTMLElement) {
       }
       restoreDraft(result.draft, result.preferences);
       if (result.draft?.mesh) await analysePhoto(result.draft.mesh);
-      else if (restoreAnalysis && faceProvider.isFixture())
-        await analysePhoto();
       else if (restoreAnalysis && original)
         status.textContent =
           "此项目没有已保存的关键点。可查看原图，或主动重新分析。";

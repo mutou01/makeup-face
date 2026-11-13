@@ -48,6 +48,36 @@ func (s *PhotoPreviewService) recordAction(operation diagnostics.Operation, ok b
 	}
 }
 
+// RecordFaceAnalysis associates the local model result with the exact active photo.
+func (s *PhotoPreviewService) RecordFaceAnalysis(photoURL string, mesh *facemesh.Result, reason string, elapsedMS int) bool {
+	if !s.busy.CompareAndSwap(false, true) {
+		return false
+	}
+	defer s.busy.Store(false)
+	s.mu.Lock()
+	if s.current.id == "" || photoURL != photoPreviewPrefix+s.current.id {
+		s.mu.Unlock()
+		return false
+	}
+	valid := mesh != nil && len(mesh.Faces) == 1 && mesh.Valid()
+	if valid {
+		s.current.mesh = mesh
+	}
+	s.mu.Unlock()
+	outcome, code := diagnostics.Failed, diagnostics.Unavailable
+	switch {
+	case valid:
+		outcome, code = diagnostics.Success, diagnostics.None
+	case mesh == nil && reason == string(diagnostics.NoFace):
+		code = diagnostics.NoFace
+	case mesh == nil && reason == string(diagnostics.MultipleFaces):
+		code = diagnostics.MultipleFaces
+	}
+	start := time.Now().Add(-time.Duration(min(max(elapsedMS, 0), 10_000)) * time.Millisecond)
+	s.diagnostics.Record(diagnostics.Analyze, outcome, code, start)
+	return valid
+}
+
 type projectResult struct {
 	Active      bool                 `json:"active"`
 	URL         string               `json:"url,omitempty"`

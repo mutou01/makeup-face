@@ -21,18 +21,16 @@ func main() {
 	preview := &PhotoPreviewService{diagnostics: diagnosticSession}
 	diagnosticsService := &DiagnosticsService{session: diagnosticSession}
 	providerService := &ProviderService{store: desktopProviderStore(), client: desktopProviderClient()}
-	fixtureAssets, faceFixture := desktopFaceFixture()
-	faceService := &FaceService{store: desktopFaceStore(), client: desktopProviderClient(), preview: preview, fixture: faceFixture}
 	imageService := &ImageService{store: desktopImageStore(), client: desktopProviderClient(), preview: preview, codex: desktopCodexImage()}
 	app := application.New(application.Options{
 		Name:        "MakeupMirror",
 		Description: "本机妆容工作台",
 		Assets: application.AssetOptions{
 			Handler:        application.BundledAssetFileServer(assets),
-			Middleware:     application.ChainMiddleware(preview.assets, fixtureAssets),
+			Middleware:     application.ChainMiddleware(preview.assets, desktopFaceRuntime()),
 			DisableLogging: true,
 		},
-		Services: []application.Service{application.NewService(preview), application.NewService(providerService), application.NewService(faceService), application.NewService(imageService), application.NewService(diagnosticsService)},
+		Services: []application.Service{application.NewService(preview), application.NewService(providerService), application.NewService(imageService), application.NewService(diagnosticsService)},
 		Windows:  desktopOptions(),
 	})
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{

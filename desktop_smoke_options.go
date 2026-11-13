@@ -34,10 +34,6 @@ func desktopProviderStore() *provider.Store {
 	return provider.NewStore(os.Getenv("MAKEUPMIRROR_SMOKE_PROFILE"), memoryVault{})
 }
 
-func desktopFaceStore() *provider.Store {
-	return provider.NewFaceStore(os.Getenv("MAKEUPMIRROR_SMOKE_PROFILE"), memoryVault{})
-}
-
 func desktopImageStore() *provider.Store {
 	return provider.NewImageStore(os.Getenv("MAKEUPMIRROR_SMOKE_PROFILE"), memoryVault{})
 }
@@ -69,12 +65,12 @@ func desktopCodexImage() provider.CodexImage {
 	}}
 }
 
-func desktopFaceFixture() (application.Middleware, bool) {
+func desktopFaceRuntime() application.Middleware {
 	root := os.Getenv("MAKEUPMIRROR_SMOKE_FACE_DIR")
 	if !filepath.IsAbs(root) {
-		return func(next http.Handler) http.Handler { return next }, false
+		return faceRuntimeAssets("", false)
 	}
-	return faceRuntimeAssets(root, os.Getenv("MAKEUPMIRROR_SMOKE_FACE_FIXTURE") == "1"), true
+	return faceRuntimeAssets(root, os.Getenv("MAKEUPMIRROR_SMOKE_FACE_FIXTURE") == "1")
 }
 
 func desktopPhotoPicker(window application.Window) func() (string, error) {
