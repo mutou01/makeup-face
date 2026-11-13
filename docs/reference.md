@@ -2,11 +2,11 @@
 
 当前交付支持 Windows amd64、本机原图预览、单人照片试妆和本地推荐。其他功能仍在 [MVP 计划](requirements-mvp.md)中。
 
-1. 安装 Windows WebView2、Go 1.26.11 或兼容的新版本和 Node.js 24。
-2. 在项目根目录运行 `npm run setup` 和 `npm run build`。无需安装本机模型。
-3. 双击 `dist/MakeupMirror.exe`，或运行 `npm start`。分析新照片前，在「云端人脸分析设置」填写[兼容的 HTTPS 接口](subsystems/cloud-face.md)和密钥。
+1. 试用者需要 Windows amd64 和 WebView2。开发者从源码构建时还需要 Go 1.26.11 和 Node.js 24。
+2. 解压离线交付包，保留 `MakeupMirror.exe` 与同目录的 `face-runtime`。开发者可按[打包说明](subsystems/cloud-face.md)生成该目录。
+3. 双击离线包中的 `MakeupMirror.exe`。本机分析无需配置账号、密钥或云端接口。
 4. 点「选择本机照片」查看原图，支持 JPEG、PNG 和 WebP。取消或选到不合格的文件时会保留原预览。「清除预览」只移除应用中的预览，不删除文件。
-5. 点「分析面部」，核对目标地址后选择「发送照片并分析」。每次只发送当前照片的缩放副本。若收到[取景、姿态、曝光或清晰度提示](subsystems/face-quality.md)，可继续查看原图并按提示重拍；通过后可分别调整口红、腮红和眼影。勾选「查看原图」不改变妆容参数。
+5. 点「分析面部」，由本机 MediaPipe 定位，照片不会发送到网络。若收到[取景、姿态、曝光或清晰度提示](subsystems/face-quality.md)，可继续查看原图并按提示重拍；通过后可分别调整口红、腮红和眼影。勾选「查看原图」不改变妆容参数。
 
 「妆容推荐」可按场景和妆感查看三套预设及理由。分析面部后可点击对应的「应用」按钮，载入可用图层的颜色和强度，再分别微调；切换筛选不会改动试妆。详见[推荐说明](subsystems/recommendations.md)。
 

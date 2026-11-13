@@ -17,7 +17,7 @@ export async function detectFaces(frame) {
   try {
     const result = landmarker.detect(frame);
     return result.faceLandmarks.map((points, i) => ({
-      points,
+      points: points.map(({ x, y }) => ({ x, y })),
       pose: result.facialTransformationMatrixes?.[i],
     }));
   } finally {

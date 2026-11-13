@@ -23,14 +23,6 @@ func desktopProviderStore() *provider.Store {
 	return provider.NewStore(filepath.Join(directory, "MakeupMirror"), provider.WindowsVault{})
 }
 
-func desktopFaceStore() *provider.Store {
-	directory, err := os.UserCacheDir()
-	if err != nil {
-		return provider.NewFaceStore("", provider.WindowsVault{})
-	}
-	return provider.NewFaceStore(filepath.Join(directory, "MakeupMirror"), provider.WindowsVault{})
-}
-
 func desktopImageStore() *provider.Store {
 	directory, err := os.UserCacheDir()
 	if err != nil {
@@ -59,6 +51,10 @@ func desktopDiagnosticPicker(window application.Window) func() (string, error) {
 	return nativeDiagnosticPicker(window)
 }
 
-func desktopFaceFixture() (application.Middleware, bool) {
-	return func(next http.Handler) http.Handler { return next }, false
+func desktopFaceRuntime() application.Middleware {
+	executable, err := os.Executable()
+	if err != nil {
+		return faceRuntimeAssets("", false)
+	}
+	return faceRuntimeAssets(filepath.Join(filepath.Dir(executable), "face-runtime"), false)
 }

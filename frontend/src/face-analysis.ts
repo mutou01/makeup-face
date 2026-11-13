@@ -5,8 +5,14 @@ export type FacePose = {
   data: ArrayLike<number>;
 };
 export type DetectedFace = { points: Point[]; pose?: FacePose };
-// The driver route is available only in the desktop test build.
-export async function detectFixtureFaces(
+export type Mesh = {
+  topology: "mediapipe-478-v1";
+  width: number;
+  height: number;
+  faces: DetectedFace[];
+};
+
+export async function detectLocalFaces(
   frame: HTMLCanvasElement,
 ): Promise<DetectedFace[] | null> {
   const driverURL = "/local-face-runtime/driver.mjs";

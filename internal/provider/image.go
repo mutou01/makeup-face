@@ -15,6 +15,7 @@ import (
 )
 
 const maxImagePNG = 16 * 1024 * 1024
+const maxReferencePNG = 5 * 1024 * 1024
 const maxImageResponse = 24 * 1024 * 1024
 
 var (
@@ -52,7 +53,7 @@ func (s *Store) EditImage(ctx context.Context, client *http.Client, endpoint, mo
 	if c.Endpoint != endpoint || c.Model != model {
 		return nil, errImageConsent
 	}
-	reference, w, h, ok := cleanPNG(encoded, 1024, maxFacePNG)
+	reference, w, h, ok := cleanPNG(encoded, 1024, maxReferencePNG)
 	if !ok {
 		return nil, errImageUnavailable
 	}

@@ -2,7 +2,7 @@
 
 - [桌面启动](desktop.md)：当前窗口、构建与验收。
 - [真人照片口红试妆](lipstick-preview.md)：唇区边界和本机合成。
-- [云端人脸分析](cloud-face.md)：逐次发送确认、网格接口与离线恢复。
+- [本机人脸分析](cloud-face.md)：MediaPipe CPU 定位、资源打包与离线恢复。
 - [云端生图预览](image-preview.md)：独立供应商设置、逐次确认、对比及导出。
 - [双颊腮红](blush-preview.md)：脸颊定位和图层独立性。
 - [上眼睑眼影](eyeshadow-preview.md)：双眼定位、眼睑和眉毛保护边界。

@@ -1,5 +1,3 @@
-//go:build desktop_smoke
-
 package main
 
 import (
@@ -18,7 +16,7 @@ import (
 //go:embed face-runtime.json
 var faceManifestJSON []byte
 
-//go:embed scripts/smoke-face-driver.mjs
+//go:embed frontend/runtime/face-driver.mjs
 var faceFixtureDriver []byte
 
 const faceRuntimePrefix = "/local-face-runtime/"

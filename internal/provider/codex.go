@@ -30,7 +30,7 @@ type CodexImage struct {
 
 func (c CodexImage) Edit(ctx context.Context, preset, encoded string) ([]byte, error) {
 	prompt := imagePrompt(preset)
-	reference, _, _, ok := cleanPNG(encoded, 1024, maxFacePNG)
+	reference, _, _, ok := cleanPNG(encoded, 1024, maxReferencePNG)
 	if prompt == "" || !ok {
 		return nil, errImageUnavailable
 	}
