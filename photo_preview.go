@@ -10,8 +10,10 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"makeupmirror/internal/diagnostics"
 	"makeupmirror/internal/facemesh"
 	"makeupmirror/internal/photo"
 	"makeupmirror/internal/project"
@@ -35,6 +37,15 @@ type PhotoPreviewService struct {
 	mu          sync.RWMutex
 	current     previewAsset
 	generated   previewAsset
+	diagnostics *diagnostics.Session
+}
+
+func (s *PhotoPreviewService) recordAction(operation diagnostics.Operation, ok bool, start time.Time) {
+	if ok {
+		s.diagnostics.Record(operation, diagnostics.Success, diagnostics.None, start)
+	} else {
+		s.diagnostics.Record(operation, diagnostics.Failed, diagnostics.Unavailable, start)
+	}
 }
 
 type projectResult struct {
@@ -68,6 +79,9 @@ func nativeExportPicker(window application.Window) func() (string, error) {
 }
 
 func (s *PhotoPreviewService) ExportPreview(encoded string) string {
+	start := time.Now()
+	outcome, code := diagnostics.Failed, diagnostics.Unavailable
+	defer func() { s.diagnostics.Record(diagnostics.Export, outcome, code, start) }()
 	if !s.busy.CompareAndSwap(false, true) {
 		return "正在处理，请稍候。"
 	}
@@ -80,11 +94,13 @@ func (s *PhotoPreviewService) ExportPreview(encoded string) string {
 	}
 	path, err := s.pickExport()
 	if err != nil || path == "" {
+		outcome, code = diagnostics.Canceled, diagnostics.None
 		return "未导出预览。"
 	}
 	if err := project.ExportPNG(path, encoded); err != nil {
 		return err.Error()
 	}
+	outcome, code = diagnostics.Success, diagnostics.None
 	return "预览已导出。"
 }
 
@@ -92,6 +108,13 @@ func (s *PhotoPreviewService) CreateProject() projectResult { return s.selectPro
 func (s *PhotoPreviewService) OpenProject() projectResult   { return s.selectProject(false) }
 
 func (s *PhotoPreviewService) selectProject(create bool) projectResult {
+	start := time.Now()
+	operation := diagnostics.Open
+	if create {
+		operation = diagnostics.Create
+	}
+	outcome, code := diagnostics.Failed, diagnostics.Unavailable
+	defer func() { s.diagnostics.Record(operation, outcome, code, start) }()
 	if !s.busy.CompareAndSwap(false, true) {
 		return projectResult{Message: "正在处理，请稍候。"}
 	}
@@ -101,6 +124,7 @@ func (s *PhotoPreviewService) selectProject(create bool) projectResult {
 	}
 	path, err := s.pickProject()
 	if err != nil || path == "" {
+		outcome, code = diagnostics.Canceled, diagnostics.None
 		return projectResult{Message: "未选择项目目录。"}
 	}
 	if create {
@@ -109,6 +133,7 @@ func (s *PhotoPreviewService) selectProject(create bool) projectResult {
 			return projectResult{Message: err.Error()}
 		}
 		s.workspace = store
+		outcome, code = diagnostics.Success, diagnostics.None
 		return projectResult{Active: true, Message: "项目已新建。"}
 	}
 	store, saved, err := project.Open(path)
@@ -123,10 +148,13 @@ func (s *PhotoPreviewService) selectProject(create bool) projectResult {
 		s.setAsset(asset)
 		result.URL = photoPreviewPrefix + asset.id
 	}
+	outcome, code = diagnostics.Success, diagnostics.None
 	return result
 }
 
-func (s *PhotoPreviewService) SaveProject(draft project.Draft) projectAction {
+func (s *PhotoPreviewService) SaveProject(draft project.Draft) (result projectAction) {
+	start := time.Now()
+	defer func() { s.recordAction(diagnostics.Save, result.Done, start) }()
 	if !s.busy.CompareAndSwap(false, true) {
 		return projectAction{Message: "正在处理，请稍候。"}
 	}
@@ -155,7 +183,9 @@ func (s *PhotoPreviewService) SaveProject(draft project.Draft) projectAction {
 	return projectAction{Done: true, Message: "项目已保存。"}
 }
 
-func (s *PhotoPreviewService) RemoveProjectPhoto() projectAction {
+func (s *PhotoPreviewService) RemoveProjectPhoto() (result projectAction) {
+	start := time.Now()
+	defer func() { s.recordAction(diagnostics.Remove, result.Done, start) }()
 	if !s.busy.CompareAndSwap(false, true) {
 		return projectAction{Message: "正在处理，请稍候。"}
 	}
@@ -170,7 +200,9 @@ func (s *PhotoPreviewService) RemoveProjectPhoto() projectAction {
 	return projectAction{Done: true, Message: "项目照片和妆容已移除。"}
 }
 
-func (s *PhotoPreviewService) CloseProject() bool {
+func (s *PhotoPreviewService) CloseProject() (ok bool) {
+	start := time.Now()
+	defer func() { s.recordAction(diagnostics.Close, ok, start) }()
 	if !s.busy.CompareAndSwap(false, true) {
 		return false
 	}

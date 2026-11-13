@@ -9,6 +9,7 @@
 - [妆容精调](makeup-controls.md)：三层范围、安全边界与原图对比。
 - [妆容推荐](recommendations.md)：本地预设、排序和试妆入口。
 - [本机项目](project-workspace.md)：单照片项目、保存与恢复。
+- [本机诊断](diagnostics.md)：有限的会话事件和耗时档位。
 - [照片质量门禁](face-quality.md)：取景、头部姿态和重拍提示。
 - [日志与供应商](foundation.md)：日志设计与供应商边界。
 - [AI 解释](ai-explanation.md)：本机设置、密钥管理、按需请求与失败回退。

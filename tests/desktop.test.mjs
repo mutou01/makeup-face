@@ -926,6 +926,214 @@ test(
   },
 );
 
+test(
+  "本机诊断显示会话内的定位失败、项目结果和导出耗时档位",
+  { timeout: 45_000 },
+  () =>
+    withDesktop(
+      async (page) => {
+        const diagnostics = page.getByRole("region", { name: "本机诊断" });
+        const refresh = diagnostics.getByRole("button", { name: "刷新诊断" });
+        await refresh.click({ timeout: 5_000 });
+        await diagnostics
+          .getByText("本次会话还没有诊断记录。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        const workspace = page.getByRole("region", { name: "本机项目" });
+        await workspace
+          .getByRole("button", { name: "新建项目", exact: true })
+          .click({ timeout: 5_000 });
+        await workspace
+          .getByText("项目已新建。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+
+        const setup = page.getByRole("region", { name: "云端人脸分析设置" });
+        await setup
+          .getByLabel("人脸网格 HTTPS 接口", { exact: true })
+          .fill("https://fixture.test/private-marker-face-mesh/face-mesh");
+        await setup
+          .getByLabel("人脸分析密钥", { exact: true })
+          .fill("diagnostic-private-marker-key");
+        await setup.getByRole("button", { name: "保存分析设置" }).click();
+        await setup
+          .getByText("分析设置已保存。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        await page.getByRole("button", { name: "选择本机照片" }).click();
+        await page
+          .getByRole("button", { name: "分析面部", exact: true })
+          .click();
+        await page
+          .getByRole("dialog", { name: "确认发送照片" })
+          .getByRole("button", { name: "发送照片并分析" })
+          .click();
+        await page
+          .getByText("云端人脸分析未能完成", { exact: false })
+          .waitFor({ timeout: 5_000 });
+        await workspace
+          .getByRole("button", { name: "保存项目", exact: true })
+          .click();
+        await workspace
+          .getByText("项目已保存。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        await page
+          .getByRole("button", { name: "导出预览", exact: true })
+          .click();
+        await page
+          .getByText("预览已导出。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        await refresh.click();
+        const list = diagnostics.getByRole("list", { name: "会话诊断事件" });
+        for (const [name, outcome] of [
+          ["新建项目", "成功"],
+          ["云端人脸定位", "失败"],
+          ["保存项目", "成功"],
+          ["导出预览", "成功"],
+        ]) {
+          const event = list.getByRole("listitem").filter({ hasText: name });
+          await event.waitFor({ timeout: 5_000 });
+          const value = await event.innerText();
+          assert.ok(value.includes(outcome));
+          assert.match(value, /毫秒|秒/);
+        }
+        assert.ok(!(await diagnostics.innerText()).includes("private-marker"));
+      },
+      async (profile) => {
+        const workspace = join(profile, "private-marker-workspace");
+        const photo = join(profile, "private-marker-input.png");
+        await mkdir(workspace);
+        await writeFile(
+          photo,
+          fixturePNG(120, 120, () => [60, 80, 120]),
+        );
+        return {
+          MAKEUPMIRROR_SMOKE_PROJECT_DIRS: JSON.stringify([workspace]),
+          MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify([photo]),
+          MAKEUPMIRROR_SMOKE_EXPORT_PATHS: JSON.stringify([
+            join(profile, "private-marker-export.png"),
+          ]),
+          MAKEUPMIRROR_SMOKE_PROVIDER_ADDR: "",
+        };
+      },
+    ),
+);
+
+test(
+  "诊断只在手动导出时落盘，不覆盖文件且只含允许字段",
+  { timeout: 45_000 },
+  () =>
+    withDesktop(
+      async (page, profile) => {
+        const panel = page.getByRole("region", { name: "本机诊断" });
+        const exportButton = panel.getByRole("button", {
+          name: "导出诊断 JSON",
+          exact: true,
+        });
+        await exportButton.waitFor({ timeout: 5_000 });
+        const output = join(profile, "diagnostics.json");
+        const protectedFile = join(profile, "existing.json");
+        const before = await readFile(protectedFile, "utf8");
+        const workspace = page.getByRole("region", { name: "本机项目" });
+        await workspace
+          .getByRole("button", { name: "新建项目", exact: true })
+          .click({ timeout: 5_000 });
+        await workspace
+          .getByText("项目已新建。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        const setup = page.getByRole("region", { name: "云端人脸分析设置" });
+        await setup
+          .getByLabel("人脸网格 HTTPS 接口", { exact: true })
+          .fill("https://fixture.test/private-marker/face-mesh");
+        await setup
+          .getByLabel("人脸分析密钥", { exact: true })
+          .fill("diagnostic-private-marker-key");
+        await setup.getByRole("button", { name: "保存分析设置" }).click();
+        await setup
+          .getByText("分析设置已保存。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        await page.getByRole("button", { name: "选择本机照片" }).click();
+        await page
+          .getByRole("button", { name: "分析面部", exact: true })
+          .click();
+        await page
+          .getByRole("dialog", { name: "确认发送照片" })
+          .getByRole("button", { name: "发送照片并分析" })
+          .click();
+        await page
+          .getByText("云端人脸分析未能完成", { exact: false })
+          .waitFor({ timeout: 5_000 });
+        await assert.rejects(access(output), { code: "ENOENT" });
+
+        await exportButton.click();
+        await panel
+          .getByText("未导出诊断。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        await assert.rejects(access(output), { code: "ENOENT" });
+        await exportButton.click();
+        await panel
+          .getByText("文件已存在，未覆盖。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        assert.equal(await readFile(protectedFile, "utf8"), before);
+        await exportButton.click();
+        await panel
+          .getByText("诊断已导出。", { exact: true })
+          .waitFor({ timeout: 5_000 });
+        const raw = await readFile(output, "utf8");
+        assert.ok(
+          !raw.includes("private-marker") &&
+            !raw.includes("fixture.test") &&
+            !raw.includes(profile),
+        );
+        const parsed = JSON.parse(raw);
+        assert.deepEqual(Object.keys(parsed).sort(), [
+          "events",
+          "schemaVersion",
+        ]);
+        assert.equal(parsed.schemaVersion, 1);
+        assert.deepEqual(
+          parsed.events.map((e) => [e.operation, e.outcome]),
+          [
+            ["project_create", "success"],
+            ["face_analysis", "failed"],
+          ],
+        );
+        for (const event of parsed.events) {
+          assert.deepEqual(Object.keys(event).sort(), [
+            "code",
+            "durationBucket",
+            "operation",
+            "outcome",
+            "time",
+          ]);
+          assert.match(event.time, /T\d{2}:\d{2}:00Z$/);
+          assert.match(
+            event.durationBucket,
+            /^(under_100ms|100ms_to_1s|1s_to_10s|10s_or_more)$/,
+          );
+        }
+      },
+      async (profile) => {
+        const workspace = join(profile, "private-marker-workspace");
+        const photo = join(profile, "private-marker-input.png");
+        const protectedFile = join(profile, "existing.json");
+        await mkdir(workspace);
+        await writeFile(protectedFile, "already here", "utf8");
+        await writeFile(
+          photo,
+          fixturePNG(120, 120, () => [60, 80, 120]),
+        );
+        return {
+          MAKEUPMIRROR_SMOKE_PROJECT_DIRS: JSON.stringify([workspace]),
+          MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify([photo]),
+          MAKEUPMIRROR_SMOKE_DIAGNOSTIC_PATHS: JSON.stringify([
+            "",
+            protectedFile,
+            join(profile, "diagnostics.json"),
+          ]),
+          MAKEUPMIRROR_SMOKE_PROVIDER_ADDR: "",
+        };
+      },
+    ),
+);
+
 async function pixels(canvas) {
   const result = await canvas.evaluate((element) => {
     const { width, height } = element;

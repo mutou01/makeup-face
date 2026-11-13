@@ -1,4 +1,5 @@
 import "./style.css";
+import { mountDiagnostics } from "./diagnostics-panel";
 import { mountPhotoPreview } from "./photo-preview";
 
 const app = document.querySelector("#app");
@@ -20,6 +21,8 @@ app.innerHTML = `
     </ol>
     <p class="status">试妆仅在本机完成。只有点击「保存项目」才写入照片副本和妆容。</p>
   </section>
+  <section id="diagnostics" aria-labelledby="diagnostics-title"></section>
 `;
 
 mountPhotoPreview(app.querySelector<HTMLElement>("#photo-preview")!);
+mountDiagnostics(app.querySelector<HTMLElement>("#diagnostics")!);
