@@ -36,6 +36,7 @@ type Layer struct {
 	Enabled  bool   `json:"enabled"`
 	Color    string `json:"color"`
 	Strength int    `json:"strength"`
+	Coverage *int   `json:"coverage,omitempty"`
 }
 
 type Preferences struct {
@@ -262,6 +263,9 @@ func valid(snapshot Snapshot) bool {
 	for _, name := range []string{"lipstick", "blush", "eyeshadow"} {
 		layer, exists := draft.Layers[name]
 		if !exists || !colorPattern.MatchString(layer.Color) || layer.Strength < 0 || layer.Strength > 100 {
+			return false
+		}
+		if layer.Coverage != nil && (*layer.Coverage < 50 || *layer.Coverage > 100) {
 			return false
 		}
 	}

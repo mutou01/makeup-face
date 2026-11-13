@@ -123,6 +123,11 @@ ol {
   image-orientation: from-image;
 }
 
+.compare-toggle {
+  margin-top: 0.75rem;
+  accent-color: #98395a;
+}
+
 .recommendation-panel {
   margin-top: 1.5rem;
   padding: 0;

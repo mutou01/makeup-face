@@ -979,6 +979,236 @@ function fixturePNG(width, height, rgbAt, extraChunks = []) {
   ]);
 }
 
+test(
+  "每层范围只向安全边界内收缩，保存重开兼容旧项目",
+  { timeout: 60_000 },
+  () =>
+    withDesktop(
+      async (page, profile) => {
+        const project = page.getByRole("region", { name: "本机项目" });
+        const click = (name) =>
+          project
+            .getByRole("button", { name, exact: true })
+            .click({ timeout: 5_000 });
+        const wait = (message) =>
+          project
+            .getByText(message, { exact: true })
+            .waitFor({ timeout: 5_000 });
+        const canvas = page.getByRole("img", { name: "试妆预览" });
+        await click("新建项目");
+        await wait("项目已新建。");
+        await page
+          .getByRole("button", { name: "选择本机照片" })
+          .click({ timeout: 5_000 });
+        await page
+          .getByRole("button", { name: "分析面部" })
+          .click({ timeout: 5_000 });
+        await canvas.waitFor({ timeout: 5_000 });
+        await page
+          .getByRole("button", { name: "应用莓果夜妆" })
+          .click({ timeout: 5_000 });
+        const full = await pixels(canvas);
+        const names = ["口红", "腮红", "眼影"];
+        const ranges = names.map((name) =>
+          page.getByRole("slider", { name: `${name}范围`, exact: true }),
+        );
+        const toggles = names.map((name) =>
+          page.getByRole("checkbox", { name: `启用${name}`, exact: true }),
+        );
+        for (let layer = 0; layer < names.length; layer++) {
+          const range = ranges[layer];
+          await range.waitFor({ timeout: 5_000 });
+          assert.equal(await range.inputValue(), "100");
+          await toggles[layer].uncheck({ timeout: 5_000 });
+          const otherLayers = await pixels(canvas);
+          await toggles[layer].check({ timeout: 5_000 });
+          await range.press("Home", { timeout: 5_000 });
+          assert.equal(await range.inputValue(), "50");
+          const narrowed = await pixels(canvas);
+          let fullCount = 0;
+          let narrowedCount = 0;
+          for (let i = 0; i < full.bytes.length; i += 4) {
+            const original = otherLayers.bytes.readUInt32LE(i);
+            const changedAtFull = full.bytes.readUInt32LE(i) !== original;
+            if (changedAtFull) fullCount++;
+            if (narrowed.bytes.readUInt32LE(i) !== original) {
+              assert.ok(changedAtFull, `${names[layer]}不能改变原范围外的像素`);
+              narrowedCount++;
+            }
+          }
+          assert.ok(
+            narrowedCount > 0 && narrowedCount < fullCount,
+            `${names[layer]}应保留部分着色并缩小作用范围`,
+          );
+          await range.press("End", { timeout: 5_000 });
+          assert.ok((await pixels(canvas)).bytes.equals(full.bytes));
+        }
+        for (const range of ranges)
+          await range.press("Home", { timeout: 5_000 });
+        const saved = await pixels(canvas);
+        await click("保存项目");
+        await wait("项目已保存。");
+        const file = join(profile, "coverage-workspace", "project.json");
+        const projectData = JSON.parse(await readFile(file, "utf8"));
+        for (const layer of Object.values(projectData.draft.layers))
+          assert.equal(layer.coverage, 50);
+        await click("关闭项目");
+        await click("打开项目");
+        await canvas.waitFor({ timeout: 10_000 });
+        for (const range of ranges)
+          assert.equal(await range.inputValue(), "50");
+        assert.ok((await pixels(canvas)).bytes.equals(saved.bytes));
+
+        await click("关闭项目");
+        projectData.draft.layers.lipstick.coverage = 101;
+        await writeFile(file, JSON.stringify(projectData));
+        await click("打开项目");
+        await wait("该目录没有可读取的妆容项目，或项目文件已损坏。");
+        await canvas.waitFor({ state: "hidden", timeout: 5_000 });
+        for (const layer of Object.values(projectData.draft.layers))
+          delete layer.coverage;
+        await writeFile(file, JSON.stringify(projectData));
+        await click("打开项目");
+        await canvas.waitFor({ timeout: 10_000 });
+        for (const range of ranges)
+          assert.equal(await range.inputValue(), "100");
+        assert.ok(
+          (await pixels(canvas)).bytes.equals(full.bytes),
+          "旧项目应恢复原安全范围",
+        );
+      },
+      async (profile) => {
+        const workspace = join(profile, "coverage-workspace");
+        await mkdir(workspace);
+        return {
+          ...(await makeupFixture(profile, ["portrait"])),
+          MAKEUPMIRROR_SMOKE_PROJECT_DIRS: JSON.stringify([
+            workspace,
+            workspace,
+            workspace,
+            workspace,
+          ]),
+        };
+      },
+    ),
+);
+
+test(
+  "原图切换不改妆容，两个显示模式均按当前画布导出",
+  { timeout: 45_000 },
+  () =>
+    withDesktop(
+      async (page, profile) => {
+        const compare = page.getByRole("checkbox", {
+          name: "查看原图",
+          exact: true,
+        });
+        const canvas = page.getByRole("img", { name: "试妆预览" });
+        const pick = page.getByRole("button", { name: "选择本机照片" });
+        const analyse = page.getByRole("button", { name: "分析面部" });
+        const exportButton = page.getByRole("button", { name: "导出预览" });
+        const photoStatus = page.getByRole("status", { name: "照片处理状态" });
+        await compare.waitFor({ state: "hidden", timeout: 5_000 });
+        await pick.click({ timeout: 5_000 });
+        await analyse.click({ timeout: 5_000 });
+        await canvas.waitFor({ timeout: 5_000 });
+        const original = await pixels(canvas);
+        await page
+          .getByRole("button", { name: "应用莓果夜妆" })
+          .click({ timeout: 5_000 });
+        const strength = page.getByRole("slider", {
+          name: "口红强度",
+          exact: true,
+        });
+        const range = page.getByRole("slider", {
+          name: "口红范围",
+          exact: true,
+        });
+        await range.press("Home", { timeout: 5_000 });
+        const madeUp = await pixels(canvas);
+        assert.ok(!madeUp.bytes.equals(original.bytes));
+
+        await compare.check({ timeout: 5_000 });
+        assert.ok((await pixels(canvas)).bytes.equals(original.bytes));
+        assert.equal(
+          await page.getByRole("checkbox", { name: "启用口红" }).isChecked(),
+          true,
+        );
+        assert.equal(await strength.inputValue(), "76");
+        assert.equal(await range.inputValue(), "50");
+        await strength.press("ArrowLeft", { timeout: 5_000 });
+        assert.ok(
+          (await pixels(canvas)).bytes.equals(original.bytes),
+          "查看原图时手动调整不应把妆容画回原图",
+        );
+        await exportButton.click({ timeout: 5_000 });
+        await photoStatus
+          .filter({ hasText: "预览已导出。" })
+          .waitFor({ timeout: 5_000 });
+        await assertPNG(canvas, join(profile, "original.png"));
+
+        await compare.uncheck({ timeout: 5_000 });
+        assert.equal(await strength.inputValue(), "75");
+        await strength.press("ArrowRight", { timeout: 5_000 });
+        assert.ok(
+          (await pixels(canvas)).bytes.equals(madeUp.bytes),
+          "切回应保留所有妆容参数",
+        );
+        await exportButton.click({ timeout: 5_000 });
+        await photoStatus
+          .filter({ hasText: "预览已导出。" })
+          .waitFor({ timeout: 5_000 });
+        await assertPNG(canvas, join(profile, "made-up.png"));
+
+        await compare.check({ timeout: 5_000 });
+        await pick.click({ timeout: 5_000 });
+        await analyse.click({ timeout: 5_000 });
+        await compare.waitFor({ timeout: 5_000 });
+        assert.equal(
+          await compare.isChecked(),
+          false,
+          "换图后退出原图对比模式",
+        );
+      },
+      async (profile) => ({
+        ...(await makeupFixture(profile, ["portrait", "portrait"])),
+        MAKEUPMIRROR_SMOKE_EXPORT_PATHS: JSON.stringify([
+          join(profile, "original.png"),
+          join(profile, "made-up.png"),
+        ]),
+      }),
+    ),
+);
+
+async function assertPNG(canvas, path) {
+  const png = await readFile(path);
+  assert.ok(
+    await canvas.evaluate(async (expected, encoded) => {
+      const bitmap = await createImageBitmap(
+        new Blob([Uint8Array.from(atob(encoded), (ch) => ch.charCodeAt(0))], {
+          type: "image/png",
+        }),
+      );
+      const copy = document.createElement("canvas");
+      copy.width = bitmap.width;
+      copy.height = bitmap.height;
+      if (copy.width !== expected.width || copy.height !== expected.height) {
+        bitmap.close();
+        return false;
+      }
+      const ctx = copy.getContext("2d");
+      ctx.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      const actual = ctx.getImageData(0, 0, copy.width, copy.height).data;
+      const wanted = expected
+        .getContext("2d")
+        .getImageData(0, 0, copy.width, copy.height).data;
+      return actual.every((n, i) => n === wanted[i]);
+    }, png.toString("base64")),
+    "导出的 PNG 应与当前画布逐像素一致",
+  );
+}
+
 function countChanges(before, after, regions) {
   const inside = regions.map(() => 0);
   let outside = 0;
@@ -1176,6 +1406,39 @@ if (realPhoto || realRuntime) {
             assert.deepEqual(external, []);
             console.log(
               `真人预设验收：唇部、双颊和双眼共五处变化 ${combined.inside.join("、")} 个像素，范围外 0。`,
+            );
+            const fullPreview = await pixels(canvas);
+            const ranges = ["口红", "腮红", "眼影"].map((name) =>
+              page.getByRole("slider", { name: `${name}范围`, exact: true }),
+            );
+            for (const range of ranges)
+              await range.press("Home", { timeout: 5_000 });
+            const narrowed = await pixels(canvas);
+            const changes = countChanges(original, narrowed, regions);
+            const total = (counts) =>
+              counts.reduce((sum, count) => sum + count, 0);
+            assert.ok(
+              changes.inside.every((count) => count > 0),
+              "真人照片收缩后仍保留妆容",
+            );
+            assert.equal(changes.outside, 0);
+            assert.ok(
+              total(changes.inside) < total(combined.inside),
+              "真人照片的着色范围应缩小",
+            );
+            const compare = page.getByRole("checkbox", {
+              name: "查看原图",
+              exact: true,
+            });
+            await compare.check({ timeout: 5_000 });
+            assert.ok((await pixels(canvas)).bytes.equals(original.bytes));
+            await compare.uncheck({ timeout: 5_000 });
+            assert.ok((await pixels(canvas)).bytes.equals(narrowed.bytes));
+            for (const range of ranges)
+              await range.press("End", { timeout: 5_000 });
+            assert.ok((await pixels(canvas)).bytes.equals(fullPreview.bytes));
+            console.log(
+              `真人精调验收：着色像素从 ${total(combined.inside)} 缩至 ${total(changes.inside)}，原图与妆后切换逐像素一致。`,
             );
           }
           if (process.env.MAKEUPMIRROR_REAL_PROJECT === "1") {
