@@ -7,12 +7,12 @@ MakeupMirror 是本机妆容工作台。当前版本支持单人照片试妆：�
 ```powershell
 npm run setup
 npm run verify
-npm start
+npm run package:offline -- <已准备的模型资源目录>
 ```
 
-`verify` 会生成 `dist/MakeupMirror.exe`，并通过独立测试构建启动真实 WebView2 窗口。已经构建时也可直接双击普通 EXE。
+`verify` 会生成 `dist/MakeupMirror.exe`，并通过独立测试构建启动真实 WebView2 窗口。
 
-无需安装本机模型。要分析新照片，请配置[兼容的 HTTPS 人脸网格接口](docs/subsystems/cloud-face.md)，每次确认后才发送当前照片的缩放副本。已保存关键点的项目可离线重开。
+按[离线包说明](docs/subsystems/cloud-face.md)准备资源后，双击离线交付包中的 `MakeupMirror.exe`。MediaPipe 随包运行，分析新照片不需要联网或配置供应商。已保存关键点的项目可离线重开。
 
 可另配[云端图片编辑接口](docs/subsystems/image-preview.md)，按预设生成妆容参考图，与原图对比并单独导出。
 

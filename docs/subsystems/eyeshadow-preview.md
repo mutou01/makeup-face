@@ -1,6 +1,6 @@
 # 上眼睑眼影
 
-在单人照片上点击「分析面部」，眼影与口红、腮红共用一次[云端定位](cloud-face.md)的结果，并在本机合成。眼影独立开关、改色和调强度；双眼定位不充分时隐藏眼影，保留可用图层。
+在单人照片上点击「分析面部」，眼影与口红、腮红共用一次[本机定位](cloud-face.md)的结果，并在本机合成。眼影独立开关、改色和调强度；双眼定位不充分时隐藏眼影，保留可用图层。
 
 [眼影遮罩](../../frontend/src/eyeshadow.ts)使用 [MediaPipe 的上眼睑和下眉缘关键点](https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/tasks/web/vision/face_landmarker/face_landmarks_connections.ts)。眼角确定局部方向，上眼睑向眉缘一侧生成羽化色带，并在两条边界留出间距；眼角逐渐淡出。眼影不进入口红、腮红遮罩。[合成器](../../frontend/src/makeup-preview.ts)从同一张工作原图重算，关闭眼影不会改变其他两层，关闭所有妆容则恢复工作原图。这是基于关键点的几何近似，未用遮挡或大侧脸样本校准。
 

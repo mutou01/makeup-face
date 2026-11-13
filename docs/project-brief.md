@@ -15,6 +15,7 @@
 3. 首批用手工原创的参数化预设。真实样本使用明确授权的原始照片；第三方代码、权重和纹理分别登记。
 4. 使用 [proj-template](https://github.com/mutou01/proj-template/tree/0cd58426f9346e81261a197d5fd72f5b5eaee19f) 的代理入口、子系统文档和统一门禁。保留[模板许可](../TEMPLATE-LICENSE.txt)，以 `npm run verify` 统一 Windows 本地与 CI 的命令，`make verify` 为便捷入口。
 5. 桌面壳采用 Go + Wails + WebView2，界面采用 TypeScript + Vite；初始化以真实 Windows 窗口和中文启动说明为验收。
+6. 正式版用随包提供的 MediaPipe 在本机定位人脸。云端仅用于可选的整图生图和文字解释；整图生图逐次确认后发送缩放照片。
 
 ## 专家会补做的工作
 
