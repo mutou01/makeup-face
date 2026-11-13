@@ -1,6 +1,11 @@
 import { detectFaces, prepareFaceFrame } from "./face-analysis";
 import { checkFraming, checkImageQuality } from "./face-quality";
-import { prepareMakeup, type LayerSettings } from "./makeup-preview";
+import {
+  FULL_COVERAGE,
+  MIN_COVERAGE,
+  prepareMakeup,
+  type LayerSettings,
+} from "./makeup-preview";
 import { mountRecommendations } from "./recommendation-panel";
 import { mountProviderSettings } from "./provider-settings";
 import type { Preset, PresetLayer } from "./recommendations";
@@ -12,7 +17,10 @@ type Preferences = {
 };
 type Makeup = {
   analyzed: boolean;
-  layers: Record<"lipstick" | "blush" | "eyeshadow", LayerSettings>;
+  layers: Record<
+    "lipstick" | "blush" | "eyeshadow",
+    Omit<LayerSettings, "coverage"> & { coverage?: number }
+  >;
 };
 type Draft = Preferences & Makeup;
 type ProjectResult = {
@@ -70,6 +78,13 @@ function layerMarkup(
           </div>
           <input id="${id}-strength" type="range" min="0" max="100" value="${strength}" />
         </div>
+        <div>
+          <div class="intensity-field">
+            <label for="${id}-coverage">${title}范围</label>
+            <output for="${id}-coverage" aria-hidden="true">${FULL_COVERAGE}%</output>
+          </div>
+          <input id="${id}-coverage" type="range" min="${MIN_COVERAGE}" max="${FULL_COVERAGE}" value="${FULL_COVERAGE}" />
+        </div>
       </div>
     </fieldset>`;
 }
@@ -82,25 +97,40 @@ function layerControls(editor: HTMLElement, id: string, onInput: () => void) {
   const color = fieldset.querySelector<HTMLInputElement>(
     'input[type="color"]',
   )!;
-  const strength = fieldset.querySelector<HTMLInputElement>(
-    'input[type="range"]',
+  const strength = fieldset.querySelector<HTMLInputElement>(`#${id}-strength`)!;
+  const coverage = fieldset.querySelector<HTMLInputElement>(`#${id}-coverage`)!;
+  const output = fieldset.querySelector<HTMLOutputElement>(
+    `output[for="${id}-strength"]`,
   )!;
-  const output = fieldset.querySelector("output")!;
+  const coverageOutput = fieldset.querySelector<HTMLOutputElement>(
+    `output[for="${id}-coverage"]`,
+  )!;
   strength.addEventListener("input", () => {
     output.value = `${strength.value}%`;
   });
-  for (const input of [enabled, color, strength])
+  function setCoverage(value: number) {
+    coverage.valueAsNumber = value;
+    coverageOutput.value = `${coverage.value}%`;
+  }
+  coverage.addEventListener("input", () => {
+    coverageOutput.value = `${coverage.value}%`;
+  });
+  for (const input of [enabled, color, strength, coverage])
     input.addEventListener("input", onInput);
-  function restore(layer: LayerSettings) {
+  function restore(
+    layer: Omit<LayerSettings, "coverage"> & { coverage?: number },
+  ) {
     enabled.checked = layer.enabled;
     color.value = layer.color;
     strength.valueAsNumber = layer.strength;
     output.value = `${strength.value}%`;
+    setCoverage(layer.coverage ?? FULL_COVERAGE);
   }
   return {
     fieldset,
     reset: () => {
       enabled.checked = false;
+      setCoverage(FULL_COVERAGE);
     },
     apply: (preset: PresetLayer) => {
       restore({ ...preset, enabled: true });
@@ -116,6 +146,7 @@ function layerControls(editor: HTMLElement, id: string, onInput: () => void) {
       enabled: enabled.checked,
       color: color.value,
       strength: strength.valueAsNumber,
+      coverage: coverage.valueAsNumber,
     }),
   };
 }

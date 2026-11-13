@@ -979,6 +979,120 @@ function fixturePNG(width, height, rgbAt, extraChunks = []) {
   ]);
 }
 
+test(
+  "每层范围只向安全边界内收缩，保存重开兼容旧项目",
+  { timeout: 60_000 },
+  () =>
+    withDesktop(
+      async (page, profile) => {
+        const project = page.getByRole("region", { name: "本机项目" });
+        const click = (name) =>
+          project
+            .getByRole("button", { name, exact: true })
+            .click({ timeout: 5_000 });
+        const wait = (message) =>
+          project
+            .getByText(message, { exact: true })
+            .waitFor({ timeout: 5_000 });
+        const canvas = page.getByRole("img", { name: "试妆预览" });
+        await click("新建项目");
+        await wait("项目已新建。");
+        await page
+          .getByRole("button", { name: "选择本机照片" })
+          .click({ timeout: 5_000 });
+        await page
+          .getByRole("button", { name: "分析面部" })
+          .click({ timeout: 5_000 });
+        await canvas.waitFor({ timeout: 5_000 });
+        await page
+          .getByRole("button", { name: "应用莓果夜妆" })
+          .click({ timeout: 5_000 });
+        const full = await pixels(canvas);
+        const names = ["口红", "腮红", "眼影"];
+        const ranges = names.map((name) =>
+          page.getByRole("slider", { name: `${name}范围`, exact: true }),
+        );
+        const toggles = names.map((name) =>
+          page.getByRole("checkbox", { name: `启用${name}`, exact: true }),
+        );
+        for (let layer = 0; layer < names.length; layer++) {
+          const range = ranges[layer];
+          await range.waitFor({ timeout: 5_000 });
+          assert.equal(await range.inputValue(), "100");
+          await toggles[layer].uncheck({ timeout: 5_000 });
+          const otherLayers = await pixels(canvas);
+          await toggles[layer].check({ timeout: 5_000 });
+          await range.press("Home", { timeout: 5_000 });
+          assert.equal(await range.inputValue(), "50");
+          const narrowed = await pixels(canvas);
+          let fullCount = 0;
+          let narrowedCount = 0;
+          for (let i = 0; i < full.bytes.length; i += 4) {
+            const original = otherLayers.bytes.readUInt32LE(i);
+            const changedAtFull = full.bytes.readUInt32LE(i) !== original;
+            if (changedAtFull) fullCount++;
+            if (narrowed.bytes.readUInt32LE(i) !== original) {
+              assert.ok(changedAtFull, `${names[layer]}不能改变原范围外的像素`);
+              narrowedCount++;
+            }
+          }
+          assert.ok(
+            narrowedCount > 0 && narrowedCount < fullCount,
+            `${names[layer]}应保留部分着色并缩小作用范围`,
+          );
+          await range.press("End", { timeout: 5_000 });
+          assert.ok((await pixels(canvas)).bytes.equals(full.bytes));
+        }
+        for (const range of ranges)
+          await range.press("Home", { timeout: 5_000 });
+        const saved = await pixels(canvas);
+        await click("保存项目");
+        await wait("项目已保存。");
+        const file = join(profile, "coverage-workspace", "project.json");
+        const projectData = JSON.parse(await readFile(file, "utf8"));
+        for (const layer of Object.values(projectData.draft.layers))
+          assert.equal(layer.coverage, 50);
+        await click("关闭项目");
+        await click("打开项目");
+        await canvas.waitFor({ timeout: 10_000 });
+        for (const range of ranges)
+          assert.equal(await range.inputValue(), "50");
+        assert.ok((await pixels(canvas)).bytes.equals(saved.bytes));
+
+        await click("关闭项目");
+        projectData.draft.layers.lipstick.coverage = 101;
+        await writeFile(file, JSON.stringify(projectData));
+        await click("打开项目");
+        await wait("该目录没有可读取的妆容项目，或项目文件已损坏。");
+        await canvas.waitFor({ state: "hidden", timeout: 5_000 });
+        for (const layer of Object.values(projectData.draft.layers))
+          delete layer.coverage;
+        await writeFile(file, JSON.stringify(projectData));
+        await click("打开项目");
+        await canvas.waitFor({ timeout: 10_000 });
+        for (const range of ranges)
+          assert.equal(await range.inputValue(), "100");
+        assert.ok(
+          (await pixels(canvas)).bytes.equals(full.bytes),
+          "旧项目应恢复原安全范围",
+        );
+      },
+      async (profile) => {
+        const workspace = join(profile, "coverage-workspace");
+        await mkdir(workspace);
+        return {
+          ...(await makeupFixture(profile, ["portrait"])),
+          MAKEUPMIRROR_SMOKE_PROJECT_DIRS: JSON.stringify([
+            workspace,
+            workspace,
+            workspace,
+            workspace,
+          ]),
+        };
+      },
+    ),
+);
+
 function countChanges(before, after, regions) {
   const inside = regions.map(() => 0);
   let outside = 0;
