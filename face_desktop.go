@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
+	"makeupmirror/internal/diagnostics"
 	"makeupmirror/internal/facemesh"
 	"makeupmirror/internal/provider"
 )
@@ -38,6 +40,9 @@ func (s *FaceService) ForgetKey() (provider.View, error) {
 }
 
 func (s *FaceService) Analyze(ctx context.Context, photoURL, endpoint, image string) (facemesh.Result, error) {
+	start := time.Now()
+	outcome, code := diagnostics.Failed, diagnostics.Unavailable
+	defer func() { s.preview.diagnostics.Record(diagnostics.Analyze, outcome, code, start) }()
 	if !s.preview.busy.CompareAndSwap(false, true) {
 		return facemesh.Result{}, errors.New("正在处理照片，请稍候。")
 	}
@@ -49,6 +54,19 @@ func (s *FaceService) Analyze(ctx context.Context, photoURL, endpoint, image str
 		return facemesh.Result{}, errors.New("当前照片已变化，请重新确认发送。")
 	}
 	result, err := s.store.AnalyzeFace(ctx, s.client, endpoint, image)
+	switch {
+	case ctx.Err() != nil:
+		outcome, code = diagnostics.Canceled, diagnostics.None
+	case err == nil:
+		switch len(result.Faces) {
+		case 0:
+			code = diagnostics.NoFace
+		case 1:
+			outcome, code = diagnostics.Success, diagnostics.None
+		default:
+			code = diagnostics.MultipleFaces
+		}
+	}
 	if err == nil && len(result.Faces) == 1 {
 		s.preview.mu.Lock()
 		s.preview.current.mesh = &result

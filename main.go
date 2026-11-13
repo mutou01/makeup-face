@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"makeupmirror/internal/diagnostics"
 )
 
 //go:embed all:frontend/dist
@@ -16,7 +17,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	preview := &PhotoPreviewService{}
+	diagnosticSession := &diagnostics.Session{}
+	preview := &PhotoPreviewService{diagnostics: diagnosticSession}
+	diagnosticsService := &DiagnosticsService{session: diagnosticSession}
 	providerService := &ProviderService{store: desktopProviderStore(), client: desktopProviderClient()}
 	fixtureAssets, faceFixture := desktopFaceFixture()
 	faceService := &FaceService{store: desktopFaceStore(), client: desktopProviderClient(), preview: preview, fixture: faceFixture}
@@ -29,7 +32,7 @@ func main() {
 			Middleware:     application.ChainMiddleware(preview.assets, fixtureAssets),
 			DisableLogging: true,
 		},
-		Services: []application.Service{application.NewService(preview), application.NewService(providerService), application.NewService(faceService), application.NewService(imageService)},
+		Services: []application.Service{application.NewService(preview), application.NewService(providerService), application.NewService(faceService), application.NewService(imageService), application.NewService(diagnosticsService)},
 		Windows:  desktopOptions(),
 	})
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
