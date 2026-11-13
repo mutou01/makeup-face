@@ -4,56 +4,14 @@ export type FacePose = {
   columns: number;
   data: ArrayLike<number>;
 };
-type DetectedFace = { points: Point[]; pose?: FacePose };
-type Landmarker = {
-  detect: (frame: HTMLCanvasElement) => {
-    faceLandmarks: Point[][];
-    facialTransformationMatrixes: FacePose[];
-  };
-  close: () => void;
-};
-type FaceRuntime = {
-  FilesetResolver: { forVisionTasks: (base: string) => Promise<unknown> };
-  FaceLandmarker: {
-    createFromOptions: (
-      files: unknown,
-      options: {
-        baseOptions: { modelAssetBuffer: Uint8Array; delegate: "CPU" };
-        runningMode: "IMAGE";
-        numFaces: number;
-        outputFacialTransformationMatrixes: true;
-      },
-    ) => Promise<Landmarker>;
-  };
-};
-
-const base = "/local-face-runtime";
-const modelAssetPath = `${base}/face_landmarker.task`;
-
-export async function detectFaces(
+export type DetectedFace = { points: Point[]; pose?: FacePose };
+// The driver route is available only in the desktop test build.
+export async function detectFixtureFaces(
   frame: HTMLCanvasElement,
 ): Promise<DetectedFace[] | null> {
-  const model = await fetch(modelAssetPath);
-  if (!model.ok) return null;
-  const modelAssetBuffer = new Uint8Array(await model.arrayBuffer());
-  const moduleURL = `${base}/vision_bundle.mjs`;
-  const runtime: FaceRuntime = await import(/* @vite-ignore */ moduleURL);
-  const files = await runtime.FilesetResolver.forVisionTasks(base);
-  const landmarker = await runtime.FaceLandmarker.createFromOptions(files, {
-    baseOptions: { modelAssetBuffer, delegate: "CPU" },
-    runningMode: "IMAGE",
-    numFaces: 2,
-    outputFacialTransformationMatrixes: true,
-  });
-  try {
-    const result = landmarker.detect(frame);
-    return result.faceLandmarks.map((points, i) => ({
-      points,
-      pose: result.facialTransformationMatrixes?.[i],
-    }));
-  } finally {
-    landmarker.close();
-  }
+  const driverURL = "/local-face-runtime/driver.mjs";
+  const driver = await import(/* @vite-ignore */ driverURL);
+  return driver.detectFaces(frame);
 }
 
 export function prepareFaceFrame(image: HTMLImageElement) {

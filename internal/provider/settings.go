@@ -64,10 +64,16 @@ type Store struct {
 	directory string
 	vault     Vault
 	mu        sync.Mutex
+	name      string
+	suffix    string
 }
 
 func NewStore(directory string, vault Vault) *Store {
-	return &Store{directory: directory, vault: vault}
+	return &Store{directory: directory, vault: vault, name: configName, suffix: "/chat/completions"}
+}
+
+func NewFaceStore(directory string, vault Vault) *Store {
+	return &Store{directory: directory, vault: vault, name: "face-provider.json", suffix: "/face-mesh"}
 }
 
 func (s *Store) View() (View, error) {
@@ -89,7 +95,7 @@ func (s *Store) Save(in Input) (View, error) {
 	}
 	next := config{Enabled: in.Enabled, Endpoint: strings.TrimSpace(in.Endpoint), Model: strings.TrimSpace(in.Model), CredentialID: old.CredentialID}
 	key := strings.TrimSpace(in.Key)
-	if err := next.validate(); err != nil {
+	if err := next.validate(s.suffix); err != nil {
 		return View{}, err
 	}
 	if next.Endpoint != old.Endpoint && old.CredentialID != "" && key == "" {
@@ -158,9 +164,12 @@ func (c config) target() string {
 	return "MakeupMirror:AI:v1:" + hex.EncodeToString(digest[:]) + ":" + c.CredentialID
 }
 
-func (c config) validate() error {
+func (c config) validate(suffix string) error {
 	if c.Endpoint != "" || c.Enabled || c.CredentialID != "" {
-		if !validEndpoint(c.Endpoint) {
+		if !validEndpoint(c.Endpoint, suffix) {
+			if suffix == "/face-mesh" {
+				return errors.New("请输入以 /face-mesh 结尾的 HTTPS 接口，不含凭据、查询参数或片段。")
+			}
 			return errEndpoint
 		}
 		if !modelPattern.MatchString(c.Model) {
@@ -172,12 +181,12 @@ func (c config) validate() error {
 	return nil
 }
 
-func validEndpoint(value string) bool {
+func validEndpoint(value, suffix string) bool {
 	if len(value) > 512 {
 		return false
 	}
 	u, err := url.Parse(value)
-	if err != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(value, "#") || u.RawPath != "" || !strings.HasSuffix(u.Path, "/chat/completions") {
+	if err != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(value, "#") || u.RawPath != "" || !strings.HasSuffix(u.Path, suffix) {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
@@ -204,7 +213,7 @@ func (s *Store) read() (config, error) {
 	if !filepath.IsAbs(s.directory) {
 		return c, errConfig
 	}
-	path := filepath.Join(s.directory, configName)
+	path := filepath.Join(s.directory, s.name)
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return c, nil
@@ -222,7 +231,7 @@ func (s *Store) read() (config, error) {
 		return c, errConfig
 	}
 	data, err := io.ReadAll(io.LimitReader(file, 4097))
-	if err != nil || len(data) > 4096 || json.Unmarshal(data, &c) != nil || c.validate() != nil || (c.CredentialID != "" && !credentialPattern.MatchString(c.CredentialID)) {
+	if err != nil || len(data) > 4096 || json.Unmarshal(data, &c) != nil || c.validate(s.suffix) != nil || (c.CredentialID != "" && !credentialPattern.MatchString(c.CredentialID)) {
 		return config{}, errConfig
 	}
 	return c, nil
@@ -243,7 +252,7 @@ func (s *Store) write(c config) error {
 		writeErr = file.Sync()
 	}
 	closeErr := file.Close()
-	if writeErr != nil || closeErr != nil || os.Rename(name, filepath.Join(s.directory, configName)) != nil {
+	if writeErr != nil || closeErr != nil || os.Rename(name, filepath.Join(s.directory, s.name)) != nil {
 		return errSave
 	}
 	return nil

@@ -1,4 +1,5 @@
-import { detectFaces, prepareFaceFrame } from "./face-analysis";
+import { detectFixtureFaces, prepareFaceFrame } from "./face-analysis";
+import { mountFaceProvider, requestFaceMesh, type Mesh } from "./face-provider";
 import { checkFraming, checkImageQuality } from "./face-quality";
 import {
   FULL_COVERAGE,
@@ -17,6 +18,7 @@ type Preferences = {
 };
 type Makeup = {
   analyzed: boolean;
+  mesh?: Mesh;
   layers: Record<
     "lipstick" | "blush" | "eyeshadow",
     Omit<LayerSettings, "coverage"> & { coverage?: number }
@@ -187,7 +189,11 @@ export function mountPhotoPreview(section: HTMLElement) {
     </div>
     <section id="recommendations" class="recommendation-panel" aria-labelledby="recommendation-title"></section>
     <section id="provider-settings" class="recommendation-panel" aria-labelledby="provider-title"></section>
+    <section id="face-provider" class="recommendation-panel" aria-labelledby="face-provider-title"></section>
   `;
+  const faceProvider = mountFaceProvider(
+    section.querySelector<HTMLElement>("#face-provider")!,
+  );
   const pick = section.querySelector<HTMLButtonElement>("#pick-photo")!;
   const clear = section.querySelector<HTMLButtonElement>("#clear-photo")!;
   const exportPreview =
@@ -282,12 +288,34 @@ export function mountPhotoPreview(section: HTMLElement) {
     return missing;
   }
 
-  async function analysePhoto() {
+  async function analysePhoto(savedMesh?: Mesh) {
     if (!original) return;
-    status.textContent = "正在本机分析面部…";
     try {
       const frame = prepareFaceFrame(original);
-      const faces = await detectFaces(frame);
+      let faces;
+      if (savedMesh) {
+        if (
+          savedMesh.width !== frame.width ||
+          savedMesh.height !== frame.height
+        ) {
+          status.textContent = "已保存的关键点尺寸与照片不符，请重新分析。";
+          return;
+        }
+        faces = savedMesh.faces;
+      } else if (faceProvider.isFixture()) {
+        faces = await detectFixtureFaces(frame);
+      } else {
+        const endpoint = await faceProvider.confirm();
+        if (!endpoint) return;
+        status.textContent = "正在等待云端人脸分析…";
+        faces = (
+          await requestFaceMesh(
+            original.src.slice(location.origin.length),
+            endpoint,
+            frame,
+          )
+        ).faces;
+      }
       if (faces === null) {
         status.textContent = "本机人脸模型尚未安装或校验失败，可继续查看原图。";
       } else if (faces.length === 0) {
@@ -325,8 +353,11 @@ export function mountPhotoPreview(section: HTMLElement) {
             ? `已定位，可启用${ready.join("、")}。`
             : `部分区域定位不完整，可启用${ready.join("、")}。`;
       }
-    } catch {
-      status.textContent = "本机人脸分析未能完成，可继续查看原图。";
+    } catch (error) {
+      status.textContent =
+        error instanceof Error
+          ? error.message
+          : "人脸分析未能完成，可继续查看原图。";
     }
   }
 
@@ -433,7 +464,12 @@ export function mountPhotoPreview(section: HTMLElement) {
         }
       }
       restoreDraft(result.draft, result.preferences);
-      if (restoreAnalysis) await analysePhoto();
+      if (result.draft?.mesh) await analysePhoto(result.draft.mesh);
+      else if (restoreAnalysis && faceProvider.isFixture())
+        await analysePhoto();
+      else if (restoreAnalysis && original)
+        status.textContent =
+          "此项目没有已保存的关键点。可查看原图，或主动重新分析。";
     } catch {
       projectStatus.textContent = "无法打开本机项目，请重试。";
     } finally {

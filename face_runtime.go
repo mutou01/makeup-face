@@ -1,3 +1,5 @@
+//go:build desktop_smoke
+
 package main
 
 import (
@@ -15,6 +17,9 @@ import (
 
 //go:embed face-runtime.json
 var faceManifestJSON []byte
+
+//go:embed scripts/smoke-face-driver.mjs
+var faceFixtureDriver []byte
 
 const faceRuntimePrefix = "/local-face-runtime/"
 
@@ -42,6 +47,15 @@ func faceRuntimeAssets(root string, fixture bool) func(http.Handler) http.Handle
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				w.Header().Set("Allow", "GET, HEAD")
 				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			if name == "driver.mjs" {
+				w.Header().Set("Content-Type", "text/javascript")
+				w.Header().Set("X-Content-Type-Options", "nosniff")
+				w.WriteHeader(http.StatusOK)
+				if r.Method == http.MethodGet {
+					_, _ = w.Write(faceFixtureDriver)
+				}
 				return
 			}
 			spec, known := manifest.Assets[name]

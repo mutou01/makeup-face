@@ -2,6 +2,8 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"sync/atomic"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"makeupmirror/internal/facemesh"
 	"makeupmirror/internal/photo"
 	"makeupmirror/internal/project"
 )
@@ -19,6 +22,7 @@ const photoPreviewPrefix = "/local-photo-preview/"
 type previewAsset struct {
 	id, format string
 	data       []byte
+	mesh       *facemesh.Result
 }
 
 // PhotoPreviewService serializes user-initiated photo and project actions.
@@ -114,7 +118,7 @@ func (s *PhotoPreviewService) selectProject(create bool) projectResult {
 	result := projectResult{Active: true, Draft: saved.Draft, Preferences: saved.Preferences, Message: "项目已打开。"}
 	s.setAsset(previewAsset{})
 	if saved.Photo != nil {
-		asset := previewAsset{id: rand.Text(), format: saved.Photo.Format, data: saved.Photo.Bytes}
+		asset := previewAsset{id: rand.Text(), format: saved.Photo.Format, data: saved.Photo.Bytes, mesh: saved.Draft.Mesh}
 		s.setAsset(asset)
 		result.URL = photoPreviewPrefix + asset.id
 	}
@@ -134,6 +138,14 @@ func (s *PhotoPreviewService) SaveProject(draft project.Draft) projectAction {
 	s.mu.RUnlock()
 	if asset.id == "" {
 		return projectAction{Message: "请选择照片后再保存。"}
+	}
+	// Only a result associated with this exact photo by the backend is saved.
+	draft.Mesh = nil
+	draft.PhotoSHA256 = ""
+	if draft.Analyzed && asset.mesh != nil {
+		draft.Mesh = asset.mesh
+		digest := sha256.Sum256(asset.data)
+		draft.PhotoSHA256 = hex.EncodeToString(digest[:])
 	}
 	snapshot := project.Snapshot{Draft: &draft.Makeup, Preferences: &draft.Preferences, Photo: &project.Photo{Format: asset.format, Bytes: asset.data}}
 	if err := s.workspace.Save(snapshot); err != nil {
