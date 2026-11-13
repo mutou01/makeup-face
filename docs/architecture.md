@@ -1,6 +1,6 @@
 # 架构与决策
 
-首版业务边界已确认：静态正面照、三套规则推荐、三类 2D 图层；3D 留到后续。妆容数据保存在用户选择的本机项目文件夹；外部请求只在用户主动操作后发起：逐次确认的云端人脸定位，以及可选的文字解释。本文描述 MVP 架构，当前实现范围见[桌面启动说明](subsystems/desktop.md)。
+首版业务边界已确认：静态正面照、三套规则推荐、三类 2D 图层；3D 留到后续。妆容数据保存在用户选择的本机项目文件夹；外部请求只在用户主动操作后发起，包括逐次确认的人脸定位和生图，以及可选的文字解释。本文描述 MVP 架构，当前实现范围见[桌面启动说明](subsystems/desktop.md)。
 
 ## 候选执行架构
 
@@ -45,6 +45,8 @@ flowchart LR
 
 [可选 AI 解释](subsystems/ai-explanation.md)默认关闭，只在用户主动点击时由 Go 请求单一 HTTPS 供应商。解释与排序、照片和渲染分开；网络失败回到本地理由。
 
+[云端生图](subsystems/image-preview.md)是独立的图片编辑请求。每次确认后发送缩放照片和预设描述，生成 PNG 供参考及单独导出，不改变本机照片、关键点或妆容图层。
+
 ## 选型与退出条件
 
 | 决策                             | 理由与重新评估条件                                                                                                                                                                                                                                                                                                       |
@@ -54,4 +56,4 @@ flowchart LR
 | 3D 后置                          | [makeup-extract](https://github.com/YangXingchao/makeup-extract) 和 [makeup-priors](https://github.com/YangXingchao/makeup-priors) 的原始说明要求 CUDA、Nvdiffrast、FLAME2020 等资产，适合独立离线对照试验。只比较使用许可已核实的代码、权重和纹理；[FLAME](https://flame.is.tue.mpg.de/) 的模型、数据和纹理有独立条款。 |
 | 不把人脸识别模型作为运行依赖     | [InsightFace 模型库](https://github.com/deepinsight/insightface/tree/master/model_zoo) 对预训练权重单列研究用途限制；如后续做相似度研究，先校准指标并确认具体权重许可。                                                                                                                                                  |
 
-供应商验收以实际接口契约、获授权样本、独立人工标注、误判和时延记录为准。外部生图是独立能力，不作为三层妆容的坐标来源。
+供应商验收以实际接口契约、获授权样本、独立人工标注、误判和时延记录为准。外部生图不作为三层妆容的坐标来源。

@@ -14,6 +14,8 @@ npm start
 
 无需安装本机模型。要分析新照片，请配置[兼容的 HTTPS 人脸网格接口](docs/subsystems/cloud-face.md)，每次确认后才发送当前照片的缩放副本。已保存关键点的项目可离线重开。
 
+可另配[云端图片编辑接口](docs/subsystems/image-preview.md)，按预设生成妆容参考图，与原图对比并单独导出。
+
 - [使用手册](docs/reference.md)
 - [项目设计与评估方法](docs/project-brief.md)
 - [需求与 MVP 验收](docs/requirements-mvp.md)

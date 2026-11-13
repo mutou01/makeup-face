@@ -1,6 +1,6 @@
 import { detectFixtureFaces, prepareFaceFrame } from "./face-analysis";
 import { mountFaceProvider, requestFaceMesh, type Mesh } from "./face-provider";
-import { mountImageSettings } from "./image-preview";
+import { mountImagePreview, mountImageSettings } from "./image-preview";
 import { checkFraming, checkImageQuality } from "./face-quality";
 import {
   FULL_COVERAGE,
@@ -189,6 +189,7 @@ export function mountPhotoPreview(section: HTMLElement) {
       </div>
     </div>
     <section id="recommendations" class="recommendation-panel" aria-labelledby="recommendation-title"></section>
+    <section id="generated-preview" class="recommendation-panel" aria-labelledby="generated-title"></section>
     <section id="provider-settings" class="recommendation-panel" aria-labelledby="provider-title"></section>
     <section id="face-provider" class="recommendation-panel" aria-labelledby="face-provider-title"></section>
     <section id="image-provider" class="recommendation-panel" aria-labelledby="image-provider-title"></section>
@@ -233,12 +234,17 @@ export function mountPhotoPreview(section: HTMLElement) {
     section.querySelector<HTMLElement>("#recommendations")!,
     applyPreset,
   );
+  const imagePreview = mountImagePreview(
+    section.querySelector<HTMLElement>("#generated-preview")!,
+    setBusy,
+  );
   mountProviderSettings(
     section.querySelector<HTMLElement>("#provider-settings")!,
     recommendations.setProvider,
   );
 
   function setBusy(busy: boolean) {
+    imagePreview.setBusy(busy);
     pick.disabled = busy;
     clear.disabled = busy || !original;
     exportPreview.disabled = busy || !original;
@@ -252,6 +258,7 @@ export function mountPhotoPreview(section: HTMLElement) {
   }
 
   function setOriginal(image?: HTMLImageElement) {
+    imagePreview.setPhoto(image);
     original = image;
     render = null;
     restoreAnalysis = false;
