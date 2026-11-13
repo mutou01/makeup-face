@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 
+	"makeupmirror/internal/facemesh"
 	"makeupmirror/internal/photo"
 )
 
@@ -45,8 +47,10 @@ type Preferences struct {
 }
 
 type Makeup struct {
-	Analyzed bool             `json:"analyzed"`
-	Layers   map[string]Layer `json:"layers"`
+	Analyzed    bool             `json:"analyzed"`
+	Layers      map[string]Layer `json:"layers"`
+	Mesh        *facemesh.Result `json:"mesh,omitempty"`
+	PhotoSHA256 string           `json:"photoSha256,omitempty"`
 }
 
 type Draft struct {
@@ -270,6 +274,14 @@ func valid(snapshot Snapshot) bool {
 		}
 	}
 	p := snapshot.Photo
+	if draft.Mesh != nil {
+		digest := sha256.Sum256(p.Bytes)
+		if !draft.Analyzed || !draft.Mesh.Valid() || len(draft.Mesh.Faces) != 1 || draft.PhotoSHA256 != hex.EncodeToString(digest[:]) {
+			return false
+		}
+	} else if draft.PhotoSHA256 != "" {
+		return false
+	}
 	info, err := photo.Inspect("photo."+p.Format, bytes.NewReader(p.Bytes))
 	return err == nil && info.Format == p.Format
 }

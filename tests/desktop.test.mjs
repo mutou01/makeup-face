@@ -499,7 +499,7 @@ test(
 );
 
 test(
-  "云端定位逐次确认，校验响应并生成本机试妆",
+  "云端定位逐次确认，保存后离线重开复用关键点",
   { timeout: 45_000 },
   async () => {
     const sent = [];
@@ -533,7 +533,7 @@ test(
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     try {
       await withDesktop(
-        async (page) => {
+        async (page, profile) => {
           const settings = page.getByRole("region", {
             name: "云端人脸分析设置",
           });
@@ -601,9 +601,58 @@ test(
           assert.ok(
             !image.includes("eXIf") && !image.includes("PRIVATE_TEST_TAG"),
           );
+          const workspace = page.getByRole("region", { name: "本机项目" });
+          const click = (name) =>
+            workspace
+              .getByRole("button", { name, exact: true })
+              .click({ timeout: 5_000 });
+          const canvas = page.getByRole("img", { name: "试妆预览" });
+          await page
+            .getByRole("button", { name: "应用日常豆沙" })
+            .click({ timeout: 5_000 });
+          const applied = await pixels(canvas);
+          await click("新建项目");
+          await click("保存项目");
+          await workspace
+            .getByText("项目已保存。", { exact: true })
+            .waitFor({ timeout: 5_000 });
+          const projectPath = join(profile, "cloud-project", "project.json");
+          const saved = JSON.parse(await readFile(projectPath, "utf8"));
+          assert.equal(saved.draft.mesh.topology, "mediapipe-478-v1");
+          assert.equal(saved.draft.mesh.faces[0].points.length, 478);
+          assert.match(saved.draft.photoSha256, /^[a-f0-9]{64}$/);
+          assert.ok(!JSON.stringify(saved).includes("fixture-face-key"));
+          await click("关闭项目");
+          await settings
+            .getByRole("button", { name: "清除人脸分析密钥" })
+            .click({ timeout: 5_000 });
+          await settings
+            .getByText("已清除人脸分析密钥。", { exact: true })
+            .waitFor({ timeout: 5_000 });
+          await click("打开项目");
+          await canvas.waitFor({ timeout: 5_000 });
+          assert.ok(
+            (await pixels(canvas)).bytes.equals(applied.bytes),
+            "无供应商凭据时仍能逐像素恢复",
+          );
+          assert.equal(sent.length, 2, "重开不得上传照片");
+          await click("关闭项目");
+          saved.photo.bytes = fixturePNG(240, 240, () => [10, 20, 30]).toString(
+            "base64",
+          );
+          await writeFile(projectPath, JSON.stringify(saved));
+          await click("打开项目");
+          await workspace
+            .getByText("该目录没有可读取的妆容项目，或项目文件已损坏。", {
+              exact: true,
+            })
+            .waitFor({ timeout: 5_000 });
+          assert.equal(sent.length, 2, "项目照片与关键点不匹配不得上传或恢复");
         },
         async (profile) => {
           const path = join(profile, "cloud-input.png");
+          const workspace = join(profile, "cloud-project");
+          await mkdir(workspace);
           await writeFile(
             path,
             fixturePNG(240, 240, detailRGB, [
@@ -619,6 +668,11 @@ test(
           return {
             MAKEUPMIRROR_SMOKE_PHOTO_SELECTIONS: JSON.stringify([path]),
             MAKEUPMIRROR_SMOKE_PROVIDER_ADDR: `127.0.0.1:${server.address().port}`,
+            MAKEUPMIRROR_SMOKE_PROJECT_DIRS: JSON.stringify([
+              workspace,
+              workspace,
+              workspace,
+            ]),
           };
         },
       );

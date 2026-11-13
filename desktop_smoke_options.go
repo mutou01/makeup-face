@@ -53,12 +53,12 @@ func desktopProviderClient() *http.Client {
 	return &http.Client{Transport: fixtureTransport{address: os.Getenv("MAKEUPMIRROR_SMOKE_PROVIDER_ADDR")}}
 }
 
-func desktopFaceRuntime() (string, bool) {
+func desktopFaceFixture() (application.Middleware, bool) {
 	root := os.Getenv("MAKEUPMIRROR_SMOKE_FACE_DIR")
 	if !filepath.IsAbs(root) {
-		return "", false
+		return func(next http.Handler) http.Handler { return next }, false
 	}
-	return root, os.Getenv("MAKEUPMIRROR_SMOKE_FACE_FIXTURE") == "1"
+	return faceRuntimeAssets(root, os.Getenv("MAKEUPMIRROR_SMOKE_FACE_FIXTURE") == "1"), true
 }
 
 func desktopPhotoPicker(window application.Window) func() (string, error) {

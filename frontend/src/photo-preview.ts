@@ -1,5 +1,5 @@
-import { detectFaces, prepareFaceFrame } from "./face-analysis";
-import { mountFaceProvider, requestFaceMesh } from "./face-provider";
+import { detectFixtureFaces, prepareFaceFrame } from "./face-analysis";
+import { mountFaceProvider, requestFaceMesh, type Mesh } from "./face-provider";
 import { checkFraming, checkImageQuality } from "./face-quality";
 import {
   FULL_COVERAGE,
@@ -18,6 +18,7 @@ type Preferences = {
 };
 type Makeup = {
   analyzed: boolean;
+  mesh?: Mesh;
   layers: Record<
     "lipstick" | "blush" | "eyeshadow",
     Omit<LayerSettings, "coverage"> & { coverage?: number }
@@ -287,13 +288,22 @@ export function mountPhotoPreview(section: HTMLElement) {
     return missing;
   }
 
-  async function analysePhoto() {
+  async function analysePhoto(savedMesh?: Mesh) {
     if (!original) return;
     try {
       const frame = prepareFaceFrame(original);
       let faces;
-      if (faceProvider.isFixture()) {
-        faces = await detectFaces(frame);
+      if (savedMesh) {
+        if (
+          savedMesh.width !== frame.width ||
+          savedMesh.height !== frame.height
+        ) {
+          status.textContent = "已保存的关键点尺寸与照片不符，请重新分析。";
+          return;
+        }
+        faces = savedMesh.faces;
+      } else if (faceProvider.isFixture()) {
+        faces = await detectFixtureFaces(frame);
       } else {
         const endpoint = await faceProvider.confirm();
         if (!endpoint) return;
@@ -454,7 +464,12 @@ export function mountPhotoPreview(section: HTMLElement) {
         }
       }
       restoreDraft(result.draft, result.preferences);
-      if (restoreAnalysis && faceProvider.isFixture()) await analysePhoto();
+      if (result.draft?.mesh) await analysePhoto(result.draft.mesh);
+      else if (restoreAnalysis && faceProvider.isFixture())
+        await analysePhoto();
+      else if (restoreAnalysis && original)
+        status.textContent =
+          "此项目没有已保存的关键点。可查看原图，或主动重新分析。";
     } catch {
       projectStatus.textContent = "无法打开本机项目，请重试。";
     } finally {

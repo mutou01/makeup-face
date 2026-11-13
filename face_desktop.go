@@ -48,5 +48,11 @@ func (s *FaceService) Analyze(ctx context.Context, photoURL, endpoint, image str
 	if id == "" || photoURL != photoPreviewPrefix+id {
 		return facemesh.Result{}, errors.New("当前照片已变化，请重新确认发送。")
 	}
-	return s.store.AnalyzeFace(ctx, s.client, endpoint, image)
+	result, err := s.store.AnalyzeFace(ctx, s.client, endpoint, image)
+	if err == nil && len(result.Faces) == 1 {
+		s.preview.mu.Lock()
+		s.preview.current.mesh = &result
+		s.preview.mu.Unlock()
+	}
+	return result, err
 }

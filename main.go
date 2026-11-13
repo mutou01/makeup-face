@@ -18,14 +18,14 @@ func main() {
 	}
 	preview := &PhotoPreviewService{}
 	providerService := &ProviderService{store: desktopProviderStore(), client: desktopProviderClient()}
-	faceRoot, faceFixture := desktopFaceRuntime()
-	faceService := &FaceService{store: desktopFaceStore(), client: desktopProviderClient(), preview: preview, fixture: faceRoot != ""}
+	fixtureAssets, faceFixture := desktopFaceFixture()
+	faceService := &FaceService{store: desktopFaceStore(), client: desktopProviderClient(), preview: preview, fixture: faceFixture}
 	app := application.New(application.Options{
 		Name:        "MakeupMirror",
 		Description: "本机妆容工作台",
 		Assets: application.AssetOptions{
 			Handler:        application.BundledAssetFileServer(assets),
-			Middleware:     application.ChainMiddleware(preview.assets, faceRuntimeAssets(faceRoot, faceFixture)),
+			Middleware:     application.ChainMiddleware(preview.assets, fixtureAssets),
 			DisableLogging: true,
 		},
 		Services: []application.Service{application.NewService(preview), application.NewService(providerService), application.NewService(faceService)},
