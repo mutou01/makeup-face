@@ -54,6 +54,7 @@ func (transport fixtureTransport) RoundTrip(req *http.Request) (*http.Response, 
 func desktopProviderClient() *http.Client {
 	return &http.Client{Transport: fixtureTransport{address: os.Getenv("MAKEUPMIRROR_SMOKE_PROVIDER_ADDR")}}
 }
+func desktopImageClient() *http.Client { return desktopProviderClient() }
 
 func desktopCodexImage() provider.CodexImage {
 	return provider.CodexImage{Command: func(ctx context.Context) (*exec.Cmd, error) {

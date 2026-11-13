@@ -6,11 +6,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"time"
 )
 
@@ -22,6 +24,8 @@ var (
 	errImageUnavailable = errors.New("生成失败，可继续查看原图或上一次生成结果。")
 	errImageResponse    = errors.New("供应商未返回有效的 PNG，已保留上一次生成结果。")
 	errImageConsent     = errors.New("生图设置已变化，请重新确认发送。")
+	errImageConnection  = errors.New("无法连接生图供应商，请检查网络或代理。")
+	errImageTimeout     = errors.New("等待生图供应商超时，可继续查看上一次结果。")
 )
 
 func imagePrompt(preset string) string {
@@ -47,7 +51,7 @@ func (s *Store) EditImage(ctx context.Context, client *http.Client, endpoint, mo
 	}
 	c, key, err := s.credentials()
 	if err != nil {
-		return nil, errImageUnavailable
+		return nil, errors.New("无法读取生图密钥，请重新检查供应商设置。")
 	}
 	defer clear(key)
 	if c.Endpoint != endpoint || c.Model != model {
@@ -67,13 +71,19 @@ func (s *Store) EditImage(ctx context.Context, client *http.Client, endpoint, mo
 
 	var payload bytes.Buffer
 	form := multipart.NewWriter(&payload)
-	for _, field := range [][2]string{{"model", c.Model}, {"prompt", prompt}, {"n", "1"}, {"size", size}, {"output_format", "png"}} {
+	fields := [][2]string{{"model", c.Model}, {"prompt", prompt}, {"n", "1"}, {"size", size}, {"output_format", "png"}}
+	imageField := "image[]"
+	if endpointURL, err := url.Parse(c.Endpoint); err == nil && isMicuImage(endpointURL) {
+		imageField = "image"
+		fields = append(fields, [2]string{"quality", "low"})
+	}
+	for _, field := range fields {
 		if form.WriteField(field[0], field[1]) != nil {
 			return nil, errImageUnavailable
 		}
 	}
 	part, err := form.CreatePart(textproto.MIMEHeader{
-		"Content-Disposition": {`form-data; name="image[]"; filename="reference.png"`},
+		"Content-Disposition": {fmt.Sprintf(`form-data; name="%s"; filename="reference.png"`, imageField)},
 		"Content-Type":        {"image/png"},
 	})
 	if err != nil {
@@ -96,13 +106,31 @@ func (s *Store) EditImage(ctx context.Context, client *http.Client, endpoint, mo
 	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	response, err := noRedirect.Do(req)
 	if err != nil {
-		return nil, errImageUnavailable
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, errImageTimeout
+		}
+		if errors.Is(err, context.Canceled) {
+			return nil, errors.New("本次生图已取消。")
+		}
+		return nil, errImageConnection
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, errImageUnavailable
+		switch response.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return nil, errors.New("生图供应商拒绝访问，请检查密钥和模型权限。")
+		case http.StatusTooManyRequests:
+			return nil, errors.New("生图供应商限流，请稍后手动重试。")
+		case http.StatusPaymentRequired:
+			return nil, errors.New("生图供应商提示余额或配额不足，请检查账户。")
+		default:
+			return nil, fmt.Errorf("生图供应商返回 HTTP %d，请检查接口和模型。", response.StatusCode)
+		}
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxImageResponse+1))
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil, errImageTimeout
+	}
 	var result struct {
 		Data []struct {
 			PNG string `json:"b64_json"`

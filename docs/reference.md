@@ -20,6 +20,8 @@
 
 要生成整图参考，可配置「生图供应商设置」中的 HTTPS 接口，或在「本次生图供应商」选择 Codex，使用本机已登录的 ChatGPT 账号。选图后在「云端妆容参考图」选预设，核对目标后逐次确认发送。生成图可与原图并列对比，或点击「导出生图 PNG」单独保存。生成结果不会替换本机试妆。详见[生图说明](subsystems/image-preview.md)。
 
+使用米醋时，地址填写 `https://www.micuapi.ai/v1/images/edits`，模型填写 `gpt-image-2`，密钥使用有图片编辑权限的令牌。若直连不可达，可使用已启用的 Windows 本机 HTTP 代理。Codex 支持官方 Windows 命令行和 npm 安装。
+
 应用缺少 WebView2 时，按 [Microsoft 指引](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution)安装运行时。验收需要能够启动桌面应用的 Windows 会话，使用 `npm run verify`。测试程序、正式构建和本机资源的区别见[桌面启动说明](subsystems/desktop.md)。
 
 排查操作失败时，可在[本机诊断](subsystems/diagnostics.md)刷新本次会话记录，或手动导出不含照片、路径和凭据的 JSON。应用不会自动保存或上传诊断。
